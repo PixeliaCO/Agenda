@@ -1,0 +1,55 @@
+/**
+ * Constantes de la agenda.
+ * Nombres de días y franjas horarias por defecto.
+ */
+
+/** Nombre del día completo (español), lunes a domingo */
+export const DAY_LETTERS = [
+  'Lunes',
+  'Martes',
+  'Miércoles',
+  'Jueves',
+  'Viernes',
+  'Sábado',
+  'Domingo',
+] as const;
+
+/** Nombre del día completo, domingo a sábado (cabeceras tipo calendario US) */
+export const WEEK_DAY_LETTERS = [
+  'Domingo',
+  'Lunes',
+  'Martes',
+  'Miércoles',
+  'Jueves',
+  'Viernes',
+  'Sábado',
+] as const;
+
+/** Horas mostradas en la vista semanal, una fila por hora (8:00 - 18:00 en etiquetas 12h) */
+export const WEEK_VIEW_HOURS = [
+  '8:00', '9:00', '10:00', '11:00', '12:00',
+  '1:00', '2:00', '3:00', '4:00', '5:00', '6:00',
+] as const;
+
+/** Franjas horarias mostradas en la vista diaria (8:00 - 18:00) */
+export const DEFAULT_HOURS = [
+  '8:00', '9:00', '10:00', '11:00', '12:00',
+  '1:00', '2:00', '3:00', '4:00', '5:00', '6:00',
+] as const;
+
+/** Opciones de hora para formulario de recordatorios (24h), cada 30 min de 08:00 a 18:00 */
+export const TIME_OPTIONS_24H: string[] = (() => {
+  const out: string[] = [];
+  for (let h = 8; h <= 18; h++) {
+    out.push(`${h < 10 ? '0' + h : h}:00`);
+    if (h < 18) out.push(`${h < 10 ? '0' + h : h}:30`);
+  }
+  return out;
+})();
+
+/** Convierte etiqueta de franja (ej. "9:00", "1:00") a hora 24h ("09:00", "13:00") */
+export function slotLabelTo24H(label: string): string {
+  const [h, m] = label.split(':').map(Number);
+  const hour = h >= 1 && h <= 6 && label.length <= 4 ? h + 12 : h;
+  return `${hour < 10 ? '0' + hour : hour}:${m < 10 ? '0' + (m || 0) : m || '00'}`;
+}

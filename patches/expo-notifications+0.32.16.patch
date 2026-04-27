@@ -1,0 +1,50 @@
+diff --git a/node_modules/expo-notifications/android/src/main/java/expo/modules/notifications/notifications/presentation/builders/ExpoNotificationBuilder.kt b/node_modules/expo-notifications/android/src/main/java/expo/modules/notifications/notifications/presentation/builders/ExpoNotificationBuilder.kt
+index 610d303..57e4337 100644
+--- a/node_modules/expo-notifications/android/src/main/java/expo/modules/notifications/notifications/presentation/builders/ExpoNotificationBuilder.kt
++++ b/node_modules/expo-notifications/android/src/main/java/expo/modules/notifications/notifications/presentation/builders/ExpoNotificationBuilder.kt
+@@ -100,6 +100,11 @@ open class ExpoNotificationBuilder(
+     builder.setAutoCancel(content.isAutoDismiss)
+     builder.setOngoing(content.isSticky)
+ 
++    // Agenda: alarma / recordatorio — categoría alarma, visible en pantalla de bloqueo (mejor despertar pantalla).
++    builder.setCategory(NotificationCompat.CATEGORY_ALARM)
++    builder.setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
++    builder.setOnlyAlertOnce(false)
++
+     // see "Notification anatomy" https://developer.android.com/develop/ui/views/notifications#Templates
+     builder.setContentTitle(content.title)
+     builder.setContentText(content.text)
+diff --git a/node_modules/expo-notifications/android/src/main/java/expo/modules/notifications/service/delegates/ExpoPresentationDelegate.kt b/node_modules/expo-notifications/android/src/main/java/expo/modules/notifications/service/delegates/ExpoPresentationDelegate.kt
+index 38f6fba..fb07099 100644
+--- a/node_modules/expo-notifications/android/src/main/java/expo/modules/notifications/service/delegates/ExpoPresentationDelegate.kt
++++ b/node_modules/expo-notifications/android/src/main/java/expo/modules/notifications/service/delegates/ExpoPresentationDelegate.kt
+@@ -7,6 +7,7 @@ import android.net.Uri
+ import android.os.Build
+ import android.os.Bundle
+ import android.os.Parcel
++import android.os.PowerManager
+ import android.provider.Settings
+ import android.service.notification.StatusBarNotification
+ import android.util.Log
+@@ -105,6 +106,21 @@ open class ExpoPresentationDelegate(
+     CoroutineScope(Dispatchers.IO).launch {
+       val androidNotification = createNotification(notification, behavior)
+ 
++      // Agenda: intenta encender la pantalla unos segundos al mostrar la notificación (requiere WAKE_LOCK).
++      try {
++        val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
++        @Suppress("DEPRECATION")
++        val wakeLock = pm.newWakeLock(
++          PowerManager.SCREEN_BRIGHT_WAKE_LOCK or
++            PowerManager.ACQUIRE_CAUSES_WAKEUP or
++            PowerManager.ON_AFTER_RELEASE,
++          "expo-notifications:AgendaAlarmWake"
++        )
++        wakeLock.acquire(20_000L)
++      } catch (e: Exception) {
++        Log.w("expo-notifications", "Agenda alarm wake lock", e)
++      }
++
+       NotificationManagerCompat.from(context).notify(
+         notification.notificationRequest.identifier,
+         getNotifyId(notification.notificationRequest),
