@@ -36,6 +36,17 @@ export function formatDisplayDate(dateISO: string): string {
   return `${d} ${MONTHS_SHORT[m - 1]} ${yearShort}`;
 }
 
+/** Fila estilo PDA (cabecera corta): "Vie 22/5/26" */
+const DOW_PDA = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+export function formatDatePdaRow(dateISO: string): string {
+  const d = new Date(dateISO + 'T12:00:00');
+  const dow = DOW_PDA[d.getDay()];
+  const day = d.getDate();
+  const month = d.getMonth() + 1;
+  const yy = String(d.getFullYear()).slice(-2);
+  return `${dow} ${day}/${month}/${yy}`;
+}
+
 function pad2(n: number): string {
   return n < 10 ? '0' + n : String(n);
 }
@@ -113,6 +124,15 @@ export function formatTime12h(time24: string): string {
   const minStr = (m || 0) < 10 ? '0' + (m || 0) : String(m || 0);
   const period = h < 12 ? 'a. m.' : 'p. m.';
   return `${hour}:${minStr} ${period}`;
+}
+
+/** Formato compacto: "4:00pm", "12:30am" (sin espacio antes de am/pm). */
+export function formatTime12hCompact(time24: string): string {
+  const [h, m] = time24.split(':').map(Number);
+  const hour = h === 0 ? 12 : h > 12 ? h - 12 : h;
+  const minStr = (m || 0) < 10 ? '0' + (m || 0) : String(m || 0);
+  const period = h < 12 ? 'am' : 'pm';
+  return `${hour}:${minStr}${period}`;
 }
 
 /** Hora en formato corto 12h para listas: "10:00", "2:00" (sin a. m./p. m.) */

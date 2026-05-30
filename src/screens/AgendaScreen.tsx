@@ -5,7 +5,7 @@
  */
 
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { DeviceEventEmitter, View, StyleSheet, Alert, Keyboard, Platform } from 'react-native';
+import { DeviceEventEmitter, View, StyleSheet, Alert, Keyboard, Platform, InteractionManager } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { runOnJS } from 'react-native-reanimated';
 import { StatusBar } from 'expo-status-bar';
@@ -41,6 +41,14 @@ import {
 import { runStartupPermissionFlow } from '../services/startupPermissionsService';
 import { getDaySchedule } from '../services/dayScheduleService';
 
+/** Minutos desde medianoche para alinear el scroll del día tras crear un evento. */
+function startTimeToScrollMinutes(startTime: string): number {
+  const parts = startTime.split(':');
+  const h = parseInt(parts[0] ?? '0', 10);
+  const m = parseInt(parts[1] ?? '0', 10);
+  return (Number.isFinite(h) ? h : 0) * 60 + (Number.isFinite(m) ? m : 0);
+}
+
 export function AgendaScreen() {
   const insets = useSafeAreaInsets();
   const { preferences, colors } = usePreferences();
@@ -60,6 +68,10 @@ export function AgendaScreen() {
   const [selectedReminder, setSelectedReminder] = useState<Reminder | null>(null);
   const [detailsInitialTarget, setDetailsInitialTarget] = useState<'alarm' | 'note' | null>(null);
   const [detailsVisible, setDetailsVisible] = useState(false);
+  const [scheduleScrollFocus, setScheduleScrollFocus] = useState<{
+    token: number;
+    startMinutes: number | null;
+  } | null>(null);
   const [inlineSlot, setInlineSlot] = useState<string | null>(null);
   const [titleEditReminderId, setTitleEditReminderId] = useState<string | null>(null);
   const [titleEditDraft, setTitleEditDraft] = useState('');
@@ -352,6 +364,20 @@ export function AgendaScreen() {
     [commitPendingTitleEdit]
   );
 
+  const handleDetailsDelete = useCallback(
+    async (id: string) => {
+      await handleDelete(id);
+      setDetailsVisible(false);
+      setDetailsInitialTarget(null);
+      setSelectedReminder(null);
+      setDetailsDefaultStartTime(undefined);
+      setTitleEditReminderId(null);
+      setTitleEditDraft('');
+      titleEditReminderIdRef.current = null;
+    },
+    [handleDelete]
+  );
+
   const handleDetailsCommit = async (
     id: string | null,
     input: Omit<CreateReminderInput, 'date' | 'startTime' | 'endTime'> & {
@@ -361,6 +387,7 @@ export function AgendaScreen() {
       endTime?: string;
     }
   ) => {
+    let createdForInlineTitle: Reminder | null = null;
     if (id == null) {
       const payload: CreateReminderInput = {
         title: input.title,
@@ -380,13 +407,34 @@ export function AgendaScreen() {
         noTime: input.noTime,
       };
       const created = await createReminder(payload);
+      createdForInlineTitle = created;
       await syncReminderNotification(created);
+      setActiveTab('day');
+      const scrollMin = payload.noTime ? null : startTimeToScrollMinutes(payload.startTime ?? '09:00');
+      setScheduleScrollFocus((prev) => ({
+        token: (prev?.token ?? 0) + 1,
+        startMinutes: scrollMin,
+      }));
     } else {
       const updated = await updateReminder(id, input);
       if (updated) await syncReminderNotification(updated);
     }
     await loadReminders();
     await loadWeekReminders();
+    if (createdForInlineTitle) {
+      const c = createdForInlineTitle;
+      InteractionManager.runAfterInteractions(() => {
+        const delay = Platform.OS === 'android' ? 200 : 120;
+        setTimeout(() => {
+          setTitleEditReminderId(c.id);
+          setTitleEditDraft(c.title ?? '');
+          titleEditReminderIdRef.current = c.id;
+          titleEditDraftRef.current = c.title ?? '';
+          setSelectedReminder(null);
+          setInlineSlot(null);
+        }, delay);
+      });
+    }
   };
 
   const handleHoy = () => {
@@ -525,6 +573,7 @@ export function AgendaScreen() {
               titleEditDraft={titleEditDraft}
               onTitleEditChange={setTitleEditDraft}
               onCommitTitleEdit={commitPendingTitleEdit}
+              scrollFocusRequest={scheduleScrollFocus}
             />
           </View>
         </GestureDetector>
@@ -584,6 +633,7 @@ export function AgendaScreen() {
         getDayVisibleRange={getDayVisibleRange}
         initialTarget={detailsInitialTarget}
         onSave={(id, input) => handleDetailsCommit(id, input)}
+        onDelete={handleDetailsDelete}
         onClose={() => {
           setDetailsVisible(false);
           setDetailsInitialTarget(null);

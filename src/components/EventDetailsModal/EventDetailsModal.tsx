@@ -3,12 +3,13 @@
  * La nota se edita en un segundo modal independiente.
  */
 
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import {
   View,
   Text,
   Modal,
   TouchableOpacity,
+  Pressable,
   TextInput,
   StyleSheet,
   ScrollView,
@@ -16,15 +17,17 @@ import {
   Platform,
   Alert,
   Keyboard,
+  useWindowDimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { Reminder, AlarmUnit } from '../../types/reminder';
 import { usePreferences } from '../../contexts/PreferencesContext';
-import { time24To12, time12To24, formatDateFull, formatTime12h } from '../../utils/date';
+import { time24To12, time12To24, formatTime12h, formatTime12hCompact, formatDateFull } from '../../utils/date';
 import { dayVisibleRangeToTimes } from '../../utils/scheduleHours';
 import { addHour } from '../../services/reminderService';
 import { scaledFontSize } from '../../utils/typography';
 import { ChangeRepeatModal, buildRepeatSummary } from '../ChangeRepeatModal';
+import { GoToDateModal } from '../GoToDateModal/GoToDateModal';
 
 export type EventDetailsModalProps = {
   visible: boolean;
@@ -36,7 +39,7 @@ export type EventDetailsModalProps = {
   defaultStartTime?: string;
   /** Rango de la cuadrícula para la fecha (todo el día = de inicio a fin de este rango) */
   getDayVisibleRange: (dateISO: string) => { startHour: number; endHour: number };
-  /** id null → crear; con id → actualizar */
+  /** id null → crear; con id → actualizar. Puede devolver Promise para cerrar el modal tras persistir. */
   onSave: (
     id: string | null,
     input: {
@@ -54,7 +57,9 @@ export type EventDetailsModalProps = {
       allDay?: boolean;
       noTime?: boolean;
     }
-  ) => void;
+  ) => void | Promise<void>;
+  /** Eliminar evento (solo edición). */
+  onDelete?: (id: string) => void | Promise<void>;
   onClose: () => void;
   /** Al abrir: ir a la sección de alarma o abrir el modal de nota */
   initialTarget?: 'alarm' | 'note' | null;
@@ -63,11 +68,37 @@ export type EventDetailsModalProps = {
 /** Aire extra entre el formulario y el teclado en el modal. */
 const MODAL_KEYBOARD_EXTRA = 32;
 
+/** Minutos en pasos de 5 (selector estilo Palm). */
+const PALM_MINUTE_STEPS = ['00', '05', '10', '15', '20', '25', '30', '35', '40', '45', '50', '55'] as const;
+
+type PalmHourRow = { label: string; hour: number; pm: boolean };
+
+const PALM_HOUR_ROWS_PM: PalmHourRow[] = [
+  { label: '12P', hour: 12, pm: true },
+  ...([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11] as const).map((n) => ({ label: String(n), hour: n, pm: true as boolean })),
+];
+
+const PALM_HOUR_ROWS_AM: PalmHourRow[] = [
+  { label: '12AM', hour: 12, pm: false },
+  ...([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11] as const).map((n) => ({ label: String(n), hour: n, pm: false as boolean })),
+];
+
 const ALARM_UNIT_OPTIONS: { value: AlarmUnit; label: string }[] = [
   { value: 'minutes', label: 'Minutos' },
   { value: 'hours', label: 'Horas' },
   { value: 'days', label: 'Días' },
 ];
+
+type DetailsPalmSnapshot = {
+  startHour: string;
+  startMin: string;
+  startPm: boolean;
+  endHour: string;
+  endMin: string;
+  endPm: boolean;
+  allDay: boolean;
+  noTime: boolean;
+};
 
 export function EventDetailsModal({
   visible,
@@ -77,13 +108,14 @@ export function EventDetailsModal({
   getDayVisibleRange,
   onSave,
   onClose,
+  onDelete,
   initialTarget = null,
 }: EventDetailsModalProps) {
   const insets = useSafeAreaInsets();
   const detailsScrollRef = useRef<ScrollView>(null);
   const alarmSectionY = useRef(0);
+  const detailsPalmSnapshotRef = useRef<DetailsPalmSnapshot | null>(null);
   const [keyboardPad, setKeyboardPad] = useState(0);
-  const [titleDraft, setTitleDraft] = useState('');
   const [startHour, setStartHour] = useState('');
   const [startMin, setStartMin] = useState('');
   const [startPm, setStartPm] = useState(false);
@@ -104,9 +136,17 @@ export function EventDetailsModal({
   const [note, setNote] = useState('');
   const [noteModalVisible, setNoteModalVisible] = useState(false);
   const [noteDraft, setNoteDraft] = useState('');
+  /** Nuevo evento + selector Palm: qué hora edita la columna derecha. */
+  const [palmTimeFocus, setPalmTimeFocus] = useState<'start' | 'end'>('start');
+  /** Columna de horas: lista AM o PM (flecha alterna). */
+  const [palmPickerPm, setPalmPickerPm] = useState(false);
+  /** Editar evento: hora colapsada; al tocar se muestran los selectores. */
+  const [detailsPalmPickerVisible, setDetailsPalmPickerVisible] = useState(false);
+  const [datePickerVisible, setDatePickerVisible] = useState(false);
 
   const { colors, fontScale } = usePreferences();
   const fs = (n: number) => scaledFontSize(n, fontScale);
+  const { height: windowHeight } = useWindowDimensions();
 
   useEffect(() => {
     const showEvt = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
@@ -124,10 +164,14 @@ export function EventDetailsModal({
       setNoteModalVisible(false);
       setAlarmUnitPickerVisible(false);
       setRepeatModalVisible(false);
-      return;
+      setDatePickerVisible(false);
+      setDetailsPalmPickerVisible(false);
     }
+  }, [visible]);
+
+  useLayoutEffect(() => {
+    if (!visible) return;
     if (reminder) {
-      setTitleDraft(reminder.title ?? '');
       const s = time24To12(reminder.noTime ? '00:00' : reminder.startTime);
       setStartHour(String(s.hour));
       setStartMin(String(s.min).padStart(2, '0'));
@@ -163,22 +207,22 @@ export function EventDetailsModal({
           setNoteModalVisible(true);
         });
       }
+      setPalmTimeFocus('start');
+      setPalmPickerPm(time24To12(reminder.noTime ? '00:00' : reminder.startTime).pm);
+      setDetailsPalmPickerVisible(false);
       return;
     }
-    setTitleDraft('');
     setDateISO(defaultDate);
     setAllDay(false);
     setNoTime(false);
-    const base = defaultStartTime?.trim() || '09:00';
-    const s = time24To12(base);
-    setStartHour(String(s.hour));
-    setStartMin(String(s.min).padStart(2, '0'));
-    setStartPm(s.pm);
-    const e = time24To12(addHour(base));
-    setEndHour(String(e.hour));
-    setEndMin(String(e.min).padStart(2, '0'));
-    setEndPm(e.pm);
-    setAlarm(true);
+    setStartHour('');
+    setStartMin('');
+    setStartPm(false);
+    setEndHour('');
+    setEndMin('');
+    setEndPm(false);
+    setPalmPickerPm(false);
+    setAlarm(false);
     setAlarmOffsetStr('5');
     setAlarmUnit('minutes');
     setRepeat('none');
@@ -186,13 +230,8 @@ export function EventDetailsModal({
     setRepeatEndDate(undefined);
     setNote('');
     setNoteModalVisible(false);
-    if (initialTarget === 'note') {
-      queueMicrotask(() => {
-        setNoteDraft('');
-        setNoteModalVisible(true);
-      });
-    }
-  }, [visible, reminder, defaultDate, defaultStartTime, initialTarget]);
+    setPalmTimeFocus('start');
+  }, [visible, reminder, defaultDate, initialTarget]);
 
   useEffect(() => {
     if (!visible || initialTarget !== 'alarm') return;
@@ -216,85 +255,148 @@ export function EventDetailsModal({
     return Math.max(0, Math.min(59, n));
   };
 
-  const handleOK = () => {
-    const title = titleDraft.trim() || 'Evento';
-    const repeatPayload =
-      repeat === 'none'
-        ? { repeat: 'none' as const, repeatInterval: undefined, repeatEndDate: undefined }
-        : {
-            repeat,
-            repeatInterval: Math.max(1, repeatInterval),
-            repeatEndDate: repeatEndDate?.trim() || undefined,
-          };
+  /** Al elegir hora en el selector Palm: inicio → min :00 y fin +1 h; fin → min :00. */
+  const applyPalmHourSelection = (row: PalmHourRow, hourListIsPm: boolean) => {
+    if (palmTimeFocus === 'start') {
+      setStartHour(String(row.hour));
+      setStartPm(row.pm);
+      setStartMin('00');
+      const start24 = time12To24(row.hour, 0, row.pm);
+      const end24 = addHour(start24);
+      const e = time24To12(end24);
+      setEndHour(String(e.hour));
+      setEndMin(String(e.min).padStart(2, '0'));
+      setEndPm(e.pm);
+    } else {
+      setEndHour(String(row.hour));
+      setEndPm(row.pm);
+      setEndMin('00');
+    }
+    setPalmPickerPm(hourListIsPm);
+  };
 
-    let startTime = '09:00';
-    let endTime = '10:00';
-    let payloadAllDay = false;
-    let payloadNoTime = false;
+  const getRepeatPayload = () =>
+    repeat === 'none'
+      ? { repeat: 'none' as const, repeatInterval: undefined, repeatEndDate: undefined }
+      : {
+          repeat,
+          repeatInterval: Math.max(1, repeatInterval),
+          repeatEndDate: repeatEndDate?.trim() || undefined,
+        };
 
-    if (noTime) {
-      startTime = '00:00';
-      endTime = '00:00';
-      payloadNoTime = true;
-    } else if (allDay) {
+  const performSave = async (p: {
+    payloadNoTime: boolean;
+    payloadAllDay: boolean;
+    startTime: string;
+    endTime: string;
+  }) => {
+    const isNewEvent = reminder === null;
+    const title = isNewEvent ? '' : (reminder.title?.trim() || 'Evento');
+    const repeatPayload = getRepeatPayload();
+    const { payloadNoTime, payloadAllDay, startTime, endTime } = p;
+
+    let saveAlarm = false;
+    let saveAlarmOffset: number | undefined;
+    let saveAlarmUnit: AlarmUnit | undefined;
+    if (!payloadNoTime) {
+      if (isNewEvent) {
+        saveAlarm = true;
+        saveAlarmOffset = 5;
+        saveAlarmUnit = 'minutes';
+      } else if (alarm) {
+        const offset = parseInt(alarmOffsetStr.trim(), 10);
+        if (!Number.isFinite(offset) || offset < 1) {
+          Alert.alert('Alarma', 'Indica un anticipo mayor que cero (número entero).');
+          return;
+        }
+        if (offset > 9999) {
+          Alert.alert('Alarma', 'El valor es demasiado grande.');
+          return;
+        }
+        saveAlarm = true;
+        saveAlarmOffset = offset;
+        saveAlarmUnit = alarmUnit;
+      }
+    }
+
+    await Promise.resolve(
+      onSave(reminder?.id ?? null, {
+        title,
+        startTime,
+        endTime,
+        date: dateISO,
+        alarm: saveAlarm,
+        alarmOffset: saveAlarmOffset,
+        alarmUnit: saveAlarmUnit,
+        allDay: payloadAllDay,
+        noTime: payloadNoTime,
+        ...repeatPayload,
+        note: note.trim() || undefined,
+      })
+    );
+    onClose();
+  };
+
+  /** Solo flujo Palm «Nuevo»: guardar y cerrar al elegir Todo el día o Sin hora (sin pulsar OK). */
+  const commitQuickSaveForNew = async (mode: 'allDay' | 'noTime') => {
+    if (reminder !== null || !dateISO) return;
+    if (mode === 'noTime') {
+      await performSave({
+        payloadNoTime: true,
+        payloadAllDay: false,
+        startTime: '00:00',
+        endTime: '00:00',
+      });
+    } else {
       const { startHour: sh, endHour: eh } = getDayVisibleRange(dateISO);
       const range = dayVisibleRangeToTimes(sh, eh);
-      startTime = range.startTime;
-      endTime = range.endTime;
-      payloadAllDay = true;
-    } else {
-      const sh = parseHour(startHour);
-      const sm = parseMin(startMin);
-      const eh = parseHour(endHour);
-      const em = parseMin(endMin);
-      if (sh === null || sm === null || eh === null || em === null) {
-        Alert.alert('Horario requerido', 'Revisa hora de inicio y fin.');
-        return;
-      }
-      startTime = time12To24(sh, sm, startPm);
-      endTime = time12To24(eh, em, endPm);
+      await performSave({
+        payloadNoTime: false,
+        payloadAllDay: true,
+        startTime: range.startTime,
+        endTime: range.endTime,
+      });
+    }
+  };
+
+  const handleOK = async () => {
+    if (noTime) {
+      await performSave({
+        payloadNoTime: true,
+        payloadAllDay: false,
+        startTime: '00:00',
+        endTime: '00:00',
+      });
+      return;
+    }
+    if (allDay) {
+      const { startHour: sh, endHour: eh } = getDayVisibleRange(dateISO);
+      const range = dayVisibleRangeToTimes(sh, eh);
+      await performSave({
+        payloadNoTime: false,
+        payloadAllDay: true,
+        startTime: range.startTime,
+        endTime: range.endTime,
+      });
+      return;
     }
 
-    const useAlarm = !noTime && alarm;
-    if (useAlarm) {
-      const offset = parseInt(alarmOffsetStr.trim(), 10);
-      if (!Number.isFinite(offset) || offset < 1) {
-        Alert.alert('Alarma', 'Indica un anticipo mayor que cero (número entero).');
-        return;
-      }
-      if (offset > 9999) {
-        Alert.alert('Alarma', 'El valor es demasiado grande.');
-        return;
-      }
-      onSave(reminder?.id ?? null, {
-        title,
-        startTime,
-        endTime,
-        date: dateISO,
-        alarm: true,
-        alarmOffset: offset,
-        alarmUnit,
-        allDay: payloadAllDay,
-        noTime: payloadNoTime,
-        ...repeatPayload,
-        note: note.trim() || undefined,
-      });
-    } else {
-      onSave(reminder?.id ?? null, {
-        title,
-        startTime,
-        endTime,
-        date: dateISO,
-        alarm: false,
-        alarmOffset: undefined,
-        alarmUnit: undefined,
-        allDay: payloadAllDay,
-        noTime: payloadNoTime,
-        ...repeatPayload,
-        note: note.trim() || undefined,
-      });
+    const sh = parseHour(startHour);
+    const sm = parseMin(startMin);
+    const eh = parseHour(endHour);
+    const em = parseMin(endMin);
+    if (sh === null || sm === null || eh === null || em === null) {
+      Alert.alert('Horario requerido', 'Revisa hora de inicio y fin.');
+      return;
     }
-    onClose();
+    const startTime = time12To24(sh, sm, startPm);
+    const endTime = time12To24(eh, em, endPm);
+    await performSave({
+      payloadNoTime: false,
+      payloadAllDay: false,
+      startTime,
+      endTime,
+    });
   };
 
   const onlyDigits = (v: string) => v.replace(/[^0-9]/g, '');
@@ -303,7 +405,45 @@ export function EventDetailsModal({
     () =>
       StyleSheet.create({
         baseText: { fontFamily: 'PixelOperator', fontWeight: 'normal' as const },
-        overlay: { flex: 1, justifyContent: 'flex-end' },
+        overlay: { flex: 1, justifyContent: 'flex-end' as const, width: '100%' as const },
+        overlayCenter: {
+          flex: 1,
+          width: '100%' as const,
+          justifyContent: 'center' as const,
+          alignItems: 'center' as const,
+          paddingHorizontal: 14,
+          paddingVertical: 20,
+        },
+        newEventBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: colors.backdrop },
+        newEventCard: {
+          width: '100%' as const,
+          maxWidth: 440,
+          maxHeight: '92%' as const,
+          backgroundColor: colors.cardBackground,
+          borderWidth: 1,
+          borderColor: colors.line,
+          borderRadius: 0,
+          paddingHorizontal: 18,
+          paddingTop: 14,
+          paddingBottom: 18,
+          zIndex: 2,
+          ...(Platform.OS === 'android' ? { elevation: 8 } : {}),
+        },
+        /** Misma tarjeta centrada que «Nuevo», para detalles del evento. */
+        detailsCenterCard: {
+          width: '100%' as const,
+          maxWidth: 440,
+          maxHeight: '92%' as const,
+          backgroundColor: colors.cardBackground,
+          borderWidth: 1,
+          borderColor: colors.line,
+          borderRadius: 0,
+          paddingHorizontal: 16,
+          paddingTop: 12,
+          paddingBottom: 10,
+          zIndex: 2,
+          ...(Platform.OS === 'android' ? { elevation: 8 } : {}),
+        },
         backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: colors.backdrop },
         box: {
           backgroundColor: colors.cardBackground,
@@ -313,6 +453,7 @@ export function EventDetailsModal({
           paddingTop: 16,
           paddingBottom: 28,
           maxHeight: '88%',
+          width: '100%' as const,
         },
         header: {
           flexDirection: 'row',
@@ -537,6 +678,214 @@ export function EventDetailsModal({
           borderTopColor: colors.line,
         },
         unitPickerOptionText: { fontSize: fs(16), color: colors.text, fontFamily: 'PixelOperator', fontWeight: 'normal' },
+        palmRoot: {
+          flexDirection: 'row' as const,
+          alignItems: 'flex-start' as const,
+          justifyContent: 'space-between' as const,
+          marginTop: 8,
+          width: '100%' as const,
+          alignSelf: 'stretch' as const,
+        },
+        palmLeft: {
+          flex: 1,
+          flexGrow: 1,
+          flexShrink: 1,
+          minWidth: 136,
+          paddingRight: 8,
+        },
+        palmSubHeaderRow: {
+          flexDirection: 'row' as const,
+          alignItems: 'center' as const,
+          justifyContent: 'space-between' as const,
+          marginBottom: 8,
+        },
+        palmSetTimeTitle: {
+          fontSize: fs(15),
+          color: colors.text,
+          fontFamily: 'PixelOperator',
+          fontWeight: 'normal' as const,
+        },
+        palmHelpIcon: { fontSize: fs(16), color: colors.textSecondary, padding: 4 },
+        palmFieldLabel: {
+          fontSize: fs(12),
+          color: colors.textSecondary,
+          marginBottom: 4,
+          fontFamily: 'PixelOperator',
+          fontWeight: 'normal' as const,
+        },
+        palmDisplayBox: {
+          borderWidth: 1,
+          borderColor: colors.line,
+          backgroundColor: colors.fieldFill,
+          paddingVertical: 10,
+          paddingHorizontal: 12,
+          borderRadius: 0,
+        },
+        palmDisplayBoxActive: {
+          borderColor: colors.daySelectedBg,
+          borderWidth: 2,
+          backgroundColor: colors.cardBackground,
+        },
+        palmDisplayText: {
+          fontSize: fs(16),
+          color: colors.text,
+          fontFamily: 'PixelOperator',
+          fontWeight: 'normal' as const,
+        },
+        palmBigActions: { marginTop: 14, gap: 8 },
+        palmBigBtn: {
+          borderWidth: 1,
+          borderColor: colors.line,
+          backgroundColor: colors.fieldFill,
+          paddingVertical: 12,
+          paddingHorizontal: 14,
+          borderRadius: 0,
+        },
+        palmBigBtnActive: {
+          backgroundColor: colors.daySelectedBg,
+          borderColor: colors.daySelectedBg,
+        },
+        palmBigBtnText: {
+          fontSize: fs(15),
+          color: colors.text,
+          fontFamily: 'PixelOperator',
+          fontWeight: 'normal' as const,
+          textAlign: 'center' as const,
+        },
+        palmBigBtnTextActive: { color: colors.onAccentBg },
+        palmBottomBar: {
+          flexDirection: 'row' as const,
+          alignItems: 'center' as const,
+          gap: 12,
+          marginTop: 16,
+          paddingTop: 12,
+          borderTopWidth: StyleSheet.hairlineWidth,
+          borderTopColor: colors.line,
+        },
+        palmBarBtn: { paddingVertical: 8, paddingHorizontal: 4 },
+        palmBarOkText: {
+          fontSize: fs(16),
+          color: colors.daySelectedBg,
+          fontFamily: 'PixelOperator',
+          fontWeight: 'normal' as const,
+        },
+        palmBarCancelText: {
+          fontSize: fs(16),
+          color: colors.textSecondary,
+          fontFamily: 'PixelOperator',
+          fontWeight: 'normal' as const,
+        },
+        palmRight: {
+          flexDirection: 'row' as const,
+          alignItems: 'flex-start' as const,
+          justifyContent: 'flex-end' as const,
+          flexShrink: 0,
+          flexGrow: 0,
+          width: 146,
+          minWidth: 146,
+          maxWidth: 146,
+          paddingTop: 0,
+          gap: 10,
+        },
+        palmColWrap: { alignItems: 'center' as const, flexShrink: 0 },
+        palmMeridianArrow: {
+          fontSize: fs(14),
+          color: colors.textSecondary,
+          fontFamily: 'PixelOperator',
+          fontWeight: 'normal' as const,
+        },
+        palmScrollCol: {
+          width: 68,
+          borderWidth: 1,
+          borderColor: colors.line,
+          backgroundColor: colors.fieldFill,
+          flexGrow: 0,
+          flexShrink: 0,
+          overflow: 'hidden' as const,
+          flexDirection: 'column' as const,
+        },
+        palmColumnInner: {
+          flex: 1,
+          flexDirection: 'column' as const,
+          minHeight: 0,
+        },
+        palmTwelveWithArrow: {
+          flexDirection: 'row' as const,
+          alignItems: 'center' as const,
+          justifyContent: 'center' as const,
+          gap: 2,
+        },
+        palmArrowBeside12: {
+          paddingHorizontal: 4,
+          paddingVertical: 2,
+          justifyContent: 'center' as const,
+          alignItems: 'center' as const,
+        },
+        palmRowCell: {
+          flex: 1,
+          minHeight: 24,
+          alignItems: 'center' as const,
+          justifyContent: 'center' as const,
+        },
+        palmScrollItem: {
+          alignItems: 'center' as const,
+          justifyContent: 'center' as const,
+        },
+        palmScrollItemActive: {
+          backgroundColor: colors.daySelectedBg,
+        },
+        palmScrollItemText: {
+          fontSize: fs(16),
+          color: colors.text,
+          fontFamily: 'PixelOperator',
+          fontWeight: 'normal' as const,
+        },
+        pdScroll: { flexGrow: 1, flexShrink: 1, maxHeight: 380, backgroundColor: colors.cardBackground },
+        pdBodyPad: {
+          paddingHorizontal: 4,
+          paddingTop: 6,
+          paddingBottom:
+            10 +
+            (keyboardPad > 0 ? MODAL_KEYBOARD_EXTRA : 0) +
+            (Platform.OS === 'android' ? keyboardPad : Math.round(keyboardPad * 0.52)),
+        },
+        pdRow: { flexDirection: 'row' as const, alignItems: 'flex-start' as const, marginBottom: 8, gap: 6 },
+        pdLabel: {
+          width: 72,
+          fontSize: fs(13),
+          fontFamily: 'PixelOperator',
+          fontWeight: 'normal' as const,
+          color: colors.textSecondary,
+          paddingTop: 6,
+        },
+        pdFieldBox: {
+          flex: 1,
+          backgroundColor: colors.fieldFill,
+          borderWidth: 1,
+          borderColor: colors.line,
+          paddingHorizontal: 10,
+          paddingVertical: 8,
+          minHeight: 36,
+        },
+        pdFieldText: {
+          fontSize: fs(14),
+          fontFamily: 'PixelOperator',
+          fontWeight: 'normal' as const,
+          color: colors.text,
+          marginBottom: 4,
+        },
+        pdMiniRow: { flexDirection: 'row' as const, flexWrap: 'wrap' as const, gap: 6, marginTop: 6 },
+        pdMiniToggle: {
+          paddingVertical: 5,
+          paddingHorizontal: 10,
+          borderWidth: 1,
+          borderColor: colors.line,
+          backgroundColor: colors.cardBackground,
+        },
+        pdMiniToggleOn: { backgroundColor: colors.todayCellBg, borderColor: colors.daySelectedBg },
+        pdMiniToggleText: { fontSize: fs(12), fontFamily: 'PixelOperator', fontWeight: 'normal' as const, color: colors.text },
+        pdCheckboxRow: { flexDirection: 'row' as const, alignItems: 'center' as const, marginBottom: 8, gap: 8 },
+        palmScrollItemTextActive: { color: colors.onAccentBg },
       }),
     [colors, fontScale]
   );
@@ -572,6 +921,14 @@ export function EventDetailsModal({
   };
 
   const toggleAllDay = () => {
+    if (reminder === null) {
+      if (allDay) {
+        setAllDay(false);
+        return;
+      }
+      void commitQuickSaveForNew('allDay');
+      return;
+    }
     if (allDay) {
       setAllDay(false);
     } else {
@@ -581,6 +938,14 @@ export function EventDetailsModal({
   };
 
   const toggleNoTime = () => {
+    if (reminder === null) {
+      if (noTime) {
+        setNoTime(false);
+        return;
+      }
+      void commitQuickSaveForNew('noTime');
+      return;
+    }
     if (noTime) {
       setNoTime(false);
     } else {
@@ -599,233 +964,557 @@ export function EventDetailsModal({
     return `De ${formatTime12h(st)} a ${formatTime12h(et)} (horario del día en la agenda)`;
   }, [dateISO, getDayVisibleRange]);
 
+  const editTimeSummary = useMemo(() => {
+    if (noTime) return 'Sin hora';
+    if (allDay) return 'Todo el día';
+    const sh = parseHour(startHour);
+    const sm = parseMin(startMin);
+    const eh = parseHour(endHour);
+    const em = parseMin(endMin);
+    if (sh === null || sm === null || eh === null || em === null) return '—';
+    const st = time12To24(sh, sm, startPm);
+    const et = time12To24(eh, em, endPm);
+    return `${formatTime12hCompact(st)} - ${formatTime12hCompact(et)}`;
+  }, [noTime, allDay, startHour, startMin, startPm, endHour, endMin, endPm]);
+
+  const handleDeletePress = () => {
+    if (!reminder?.id || !onDelete) return;
+    Alert.alert('Eliminar', '¿Eliminar este evento?', [
+      { text: 'Cancelar', style: 'cancel' },
+      {
+        text: 'Eliminar',
+        style: 'destructive',
+        onPress: () => {
+          void Promise.resolve(onDelete(reminder.id));
+        },
+      },
+    ]);
+  };
+
+  const openDetailsPalmPicker = () => {
+    detailsPalmSnapshotRef.current = {
+      startHour,
+      startMin,
+      startPm,
+      endHour,
+      endMin,
+      endPm,
+      allDay,
+      noTime,
+    };
+    setPalmTimeFocus('start');
+    if (startHour.trim() !== '') setPalmPickerPm(startPm);
+    setDetailsPalmPickerVisible(true);
+  };
+
+  const closeDetailsPalmPicker = (apply: boolean) => {
+    if (!apply && detailsPalmSnapshotRef.current) {
+      const s = detailsPalmSnapshotRef.current;
+      setStartHour(s.startHour);
+      setStartMin(s.startMin);
+      setStartPm(s.startPm);
+      setEndHour(s.endHour);
+      setEndMin(s.endMin);
+      setEndPm(s.endPm);
+      setAllDay(s.allDay);
+      setNoTime(s.noTime);
+    }
+    detailsPalmSnapshotRef.current = null;
+    setDetailsPalmPickerVisible(false);
+  };
+
   if (!visible) return null;
 
   const showTimePickers = !noTime && !allDay;
+  /** Solo muestra texto cuando hay hora y minuto elegidos (Nuevo: empieza vacío). */
+  const palmStartReadout =
+    startHour.trim() === '' || startMin.trim() === ''
+      ? ''
+      : `${startHour}:${startMin.padStart(2, '0')} ${startPm ? 'p.m.' : 'a.m.'}`;
+  const palmEndReadout =
+    endHour.trim() === '' || endMin.trim() === ''
+      ? ''
+      : `${endHour}:${endMin.padStart(2, '0')} ${endPm ? 'p.m.' : 'a.m.'}`;
+  /** Altura fija de las columnas hora/minuto (12 filas sin scroll). */
+  const newPalmColHeight = Math.min(480, Math.max(340, Math.floor(windowHeight * 0.52)));
+
+  const renderPalmTimePickers = (onPalmOk: () => void, onPalmCancel: () => void) => (
+    <>
+      {showTimePickers ? (
+                  <View style={styles.palmRoot}>
+                    <View style={styles.palmLeft}>
+                      <Text style={styles.palmFieldLabel}>Inicio</Text>
+                      <Pressable
+                        style={({ pressed }) => [
+                          styles.palmDisplayBox,
+                          palmTimeFocus === 'start' && styles.palmDisplayBoxActive,
+                          pressed && { opacity: 0.88 },
+                        ]}
+                        onPress={() => {
+                          setPalmTimeFocus('start');
+                          if (startHour.trim() !== '') setPalmPickerPm(startPm);
+                        }}
+                      >
+                        <Text style={styles.palmDisplayText}>{palmStartReadout}</Text>
+                      </Pressable>
+                      <Text style={[styles.palmFieldLabel, { marginTop: 10 }]}>Fin</Text>
+                      <Pressable
+                        style={({ pressed }) => [
+                          styles.palmDisplayBox,
+                          palmTimeFocus === 'end' && styles.palmDisplayBoxActive,
+                          pressed && { opacity: 0.88 },
+                        ]}
+                        onPress={() => {
+                          setPalmTimeFocus('end');
+                          if (endHour.trim() !== '') setPalmPickerPm(endPm);
+                        }}
+                      >
+                        <Text style={styles.palmDisplayText}>{palmEndReadout}</Text>
+                      </Pressable>
+                      <View style={styles.palmBigActions}>
+                        <TouchableOpacity
+                          style={[styles.palmBigBtn, allDay && styles.palmBigBtnActive]}
+                          onPress={toggleAllDay}
+                          activeOpacity={0.7}
+                        >
+                          <Text style={[styles.palmBigBtnText, allDay && styles.palmBigBtnTextActive]}>
+                            Todo el día
+                          </Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={[styles.palmBigBtn, noTime && styles.palmBigBtnActive]}
+                          onPress={toggleNoTime}
+                          activeOpacity={0.7}
+                        >
+                          <Text style={[styles.palmBigBtnText, noTime && styles.palmBigBtnTextActive]}>
+                            Sin hora
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+                      <View style={styles.palmBottomBar}>
+                        <TouchableOpacity style={styles.palmBarBtn} onPress={() => void onPalmOk()}>
+                          <Text style={styles.palmBarOkText}>OK</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={styles.palmBarBtn} onPress={onPalmCancel}>
+                          <Text style={styles.palmBarCancelText}>Cancelar</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                    <View style={styles.palmRight}>
+                      <View style={styles.palmColWrap}>
+                        <View style={[styles.palmScrollCol, { height: newPalmColHeight }]}>
+                          <View style={styles.palmColumnInner}>
+                            {!palmPickerPm ? (
+                              <>
+                                {(() => {
+                                  const row = PALM_HOUR_ROWS_AM[0];
+                                  const h = palmTimeFocus === 'start' ? startHour : endHour;
+                                  const pmSel = palmTimeFocus === 'start' ? startPm : endPm;
+                                  const hn = h.trim() === '' ? null : parseHour(h);
+                                  const active = hn === row.hour && pmSel === row.pm;
+                                  return (
+                                    <Pressable
+                                      key="am-12"
+                                      style={({ pressed }) => [
+                                        styles.palmRowCell,
+                                        styles.palmScrollItem,
+                                        active && styles.palmScrollItemActive,
+                                        pressed && { opacity: 0.85 },
+                                      ]}
+                                      onPress={() => applyPalmHourSelection(row, false)}
+                                    >
+                                      <Text
+                                        style={[styles.palmScrollItemText, active && styles.palmScrollItemTextActive]}
+                                      >
+                                        {row.label}
+                                      </Text>
+                                    </Pressable>
+                                  );
+                                })()}
+                                {PALM_HOUR_ROWS_AM.slice(1, 11).map((row) => {
+                                  const h = palmTimeFocus === 'start' ? startHour : endHour;
+                                  const pmSel = palmTimeFocus === 'start' ? startPm : endPm;
+                                  const hn = h.trim() === '' ? null : parseHour(h);
+                                  const active = hn === row.hour && pmSel === row.pm;
+                                  return (
+                                    <Pressable
+                                      key={`am-${row.label}`}
+                                      style={({ pressed }) => [
+                                        styles.palmRowCell,
+                                        styles.palmScrollItem,
+                                        active && styles.palmScrollItemActive,
+                                        pressed && { opacity: 0.85 },
+                                      ]}
+                                      onPress={() => applyPalmHourSelection(row, false)}
+                                    >
+                                      <Text
+                                        style={[styles.palmScrollItemText, active && styles.palmScrollItemTextActive]}
+                                      >
+                                        {row.label}
+                                      </Text>
+                                    </Pressable>
+                                  );
+                                })}
+                                {(() => {
+                                  const row = PALM_HOUR_ROWS_AM[11];
+                                  const h = palmTimeFocus === 'start' ? startHour : endHour;
+                                  const pmSel = palmTimeFocus === 'start' ? startPm : endPm;
+                                  const hn = h.trim() === '' ? null : parseHour(h);
+                                  const active = hn === row.hour && pmSel === row.pm;
+                                  return (
+                                    <View
+                                      key="am-11-arrow"
+                                      style={[
+                                        styles.palmRowCell,
+                                        styles.palmScrollItem,
+                                        styles.palmTwelveWithArrow,
+                                        active && styles.palmScrollItemActive,
+                                      ]}
+                                    >
+                                      <Pressable
+                                        style={({ pressed }) => [
+                                          { flex: 1, alignItems: 'center' as const, justifyContent: 'center' as const },
+                                          pressed && { opacity: 0.85 },
+                                        ]}
+                                        onPress={() => applyPalmHourSelection(row, false)}
+                                      >
+                                        <Text
+                                          style={[
+                                            styles.palmScrollItemText,
+                                            active && styles.palmScrollItemTextActive,
+                                          ]}
+                                        >
+                                          {row.label}
+                                        </Text>
+                                      </Pressable>
+                                      <TouchableOpacity
+                                        style={styles.palmArrowBeside12}
+                                        onPress={() => setPalmPickerPm(true)}
+                                        hitSlop={{ top: 10, bottom: 10, left: 6, right: 6 }}
+                                        accessibilityLabel="Ver horas de la tarde"
+                                      >
+                                        <Text style={styles.palmMeridianArrow}>↓</Text>
+                                      </TouchableOpacity>
+                                    </View>
+                                  );
+                                })()}
+                              </>
+                            ) : (
+                              <>
+                                {(() => {
+                                  const row = PALM_HOUR_ROWS_PM[0];
+                                  const h = palmTimeFocus === 'start' ? startHour : endHour;
+                                  const pmSel = palmTimeFocus === 'start' ? startPm : endPm;
+                                  const hn = h.trim() === '' ? null : parseHour(h);
+                                  const active = hn === row.hour && pmSel === row.pm;
+                                  return (
+                                    <View
+                                      key="pm-12-arrow"
+                                      style={[
+                                        styles.palmRowCell,
+                                        styles.palmScrollItem,
+                                        styles.palmTwelveWithArrow,
+                                        active && styles.palmScrollItemActive,
+                                      ]}
+                                    >
+                                      <TouchableOpacity
+                                        style={styles.palmArrowBeside12}
+                                        onPress={() => setPalmPickerPm(false)}
+                                        hitSlop={{ top: 10, bottom: 10, left: 6, right: 6 }}
+                                        accessibilityLabel="Ver horas de la mañana"
+                                      >
+                                        <Text style={styles.palmMeridianArrow}>↑</Text>
+                                      </TouchableOpacity>
+                                      <Pressable
+                                        style={({ pressed }) => [
+                                          { flex: 1, alignItems: 'center' as const, justifyContent: 'center' as const },
+                                          pressed && { opacity: 0.85 },
+                                        ]}
+                                        onPress={() => applyPalmHourSelection(row, true)}
+                                      >
+                                        <Text
+                                          style={[
+                                            styles.palmScrollItemText,
+                                            active && styles.palmScrollItemTextActive,
+                                          ]}
+                                        >
+                                          {row.label}
+                                        </Text>
+                                      </Pressable>
+                                    </View>
+                                  );
+                                })()}
+                                {PALM_HOUR_ROWS_PM.slice(1).map((row) => {
+                                  const h = palmTimeFocus === 'start' ? startHour : endHour;
+                                  const pmSel = palmTimeFocus === 'start' ? startPm : endPm;
+                                  const hn = h.trim() === '' ? null : parseHour(h);
+                                  const active = hn === row.hour && pmSel === row.pm;
+                                  return (
+                                    <Pressable
+                                      key={`pm-${row.label}`}
+                                      style={({ pressed }) => [
+                                        styles.palmRowCell,
+                                        styles.palmScrollItem,
+                                        active && styles.palmScrollItemActive,
+                                        pressed && { opacity: 0.85 },
+                                      ]}
+                                      onPress={() => applyPalmHourSelection(row, true)}
+                                    >
+                                      <Text
+                                        style={[styles.palmScrollItemText, active && styles.palmScrollItemTextActive]}
+                                      >
+                                        {row.label}
+                                      </Text>
+                                    </Pressable>
+                                  );
+                                })}
+                              </>
+                            )}
+                          </View>
+                        </View>
+                      </View>
+                      <View style={[styles.palmScrollCol, { height: newPalmColHeight }]}>
+                        <View style={styles.palmColumnInner}>
+                          {PALM_MINUTE_STEPS.map((mm) => {
+                            const mNow = palmTimeFocus === 'start' ? startMin : endMin;
+                            const hasMin = mNow.trim() !== '';
+                            const active = hasMin && mNow.padStart(2, '0') === mm;
+                            return (
+                              <Pressable
+                                key={mm}
+                                style={({ pressed }) => [
+                                  styles.palmRowCell,
+                                  styles.palmScrollItem,
+                                  active && styles.palmScrollItemActive,
+                                  pressed && { opacity: 0.85 },
+                                ]}
+                                onPress={() => {
+                                  if (palmTimeFocus === 'start') setStartMin(mm);
+                                  else setEndMin(mm);
+                                }}
+                              >
+                                <Text style={[styles.palmScrollItemText, active && styles.palmScrollItemTextActive]}>
+                                  {mm}
+                                </Text>
+                              </Pressable>
+                            );
+                          })}
+                        </View>
+                      </View>
+                    </View>
+                  </View>
+                ) : (
+                  <View style={{ paddingTop: 8, paddingHorizontal: 2, gap: 10 }}>
+                    <TouchableOpacity
+                      style={[styles.palmBigBtn, allDay && styles.palmBigBtnActive]}
+                      onPress={toggleAllDay}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={[styles.palmBigBtnText, allDay && styles.palmBigBtnTextActive]}>Todo el día</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.palmBigBtn, noTime && styles.palmBigBtnActive]}
+                      onPress={toggleNoTime}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={[styles.palmBigBtnText, noTime && styles.palmBigBtnTextActive]}>Sin hora</Text>
+                    </TouchableOpacity>
+                    <View style={[styles.palmBottomBar, { marginTop: 8 }]}>
+                      <TouchableOpacity style={styles.palmBarBtn} onPress={() => void onPalmOk()}>
+                        <Text style={styles.palmBarOkText}>OK</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity style={styles.palmBarBtn} onPress={onPalmCancel}>
+                        <Text style={styles.palmBarCancelText}>Cancelar</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                )}
+    </>
+  );
 
   return (
     <>
-      <Modal visible={visible} animationType="slide" transparent>
+      <Modal visible={visible} animationType="fade" transparent>
+        {reminder ? (
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          style={styles.overlay}
+          style={styles.overlayCenter}
           keyboardVerticalOffset={Platform.OS === 'ios' ? Math.max(insets.top, 12) : 0}
         >
-          <TouchableOpacity style={styles.backdrop} activeOpacity={1} onPress={onClose} />
-          <View style={styles.box}>
-          <View style={styles.header}>
-            <Text style={styles.headerTitle}>{reminder ? 'Detalles del evento' : 'Nuevo evento'}</Text>
-          </View>
-          <View style={styles.sectionBlock}>
-            <Text style={styles.sectionTitleBordered}>Título</Text>
-            <TextInput
-              style={[styles.titleText, styles.titleInput]}
-              value={titleDraft}
-              onChangeText={setTitleDraft}
-              placeholder="Título del evento"
-              placeholderTextColor={colors.placeholder}
-              accessibilityLabel="Título del evento"
-            />
-          </View>
-          <ScrollView
-            ref={detailsScrollRef}
-            keyboardShouldPersistTaps="handled"
-            keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
-            automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
-            style={{ maxHeight: 400 }}
-            contentContainerStyle={{
-              paddingBottom:
-                12 +
-                insets.bottom +
-                (keyboardPad > 0 ? MODAL_KEYBOARD_EXTRA : 0) +
-                (Platform.OS === 'android' ? keyboardPad : Math.round(keyboardPad * 0.52)),
-            }}
-          >
-            <View style={styles.sectionBlock}>
-              <Text style={styles.sectionTitleBordered}>Horario del evento</Text>
-              <View style={styles.checkboxRow}>
-                <TouchableOpacity
-                  style={[styles.checkbox, allDay && styles.checkboxChecked]}
-                  onPress={toggleAllDay}
-                >
-                  {allDay && <Text style={{ color: colors.onAccentBg, fontSize: fs(14) }}>✓</Text>}
-                </TouchableOpacity>
-                <Text style={styles.label}>Todo el día</Text>
-              </View>
-              <View style={[styles.checkboxRow, { marginTop: 8 }]}>
-                <TouchableOpacity
-                  style={[styles.checkbox, noTime && styles.checkboxChecked]}
-                  onPress={toggleNoTime}
-                >
-                  {noTime && <Text style={{ color: colors.onAccentBg, fontSize: fs(14) }}>✓</Text>}
-                </TouchableOpacity>
-                <Text style={styles.label}>Sin tiempo</Text>
-              </View>
-              <View style={styles.timeGroup}>
-              {noTime ? (
-                <Text style={styles.timeRangeText}>Sin hora (recordatorio en la parte superior del día)</Text>
-              ) : allDay ? (
-                <Text style={styles.timeRangeText}>Todo el día: {allDayRangeSummary}</Text>
-              ) : (
-              <Text style={styles.timeRangeText}>
-                De {[startHour || '00', (startMin || '00').padStart(2, '0')].join('-')} {startPm ? 'p. m.' : 'a. m.'} a {[endHour || '00', (endMin || '00').padStart(2, '0')].join('-')} {endPm ? 'p. m.' : 'a. m.'}
-              </Text>
-              )}
-              {showTimePickers ? (
-                <>
-                  <View style={styles.timeRow}>
-                    <Text style={styles.timeRowLabel}>Inicio</Text>
-                    <View style={styles.timeInputsRow}>
-                      <View style={styles.timeGroupInline}>
-                        <TextInput
-                          style={styles.timeInputSmall}
-                          value={startHour}
-                          onChangeText={(v) => setStartHour(onlyDigits(v).slice(0, 2))}
-                          keyboardType="number-pad"
-                          placeholder="00"
-                          placeholderTextColor={colors.placeholder}
-                        />
-                        <Text style={styles.timeColon}>-</Text>
-                        <TextInput
-                          style={styles.timeInputSmall}
-                          value={startMin}
-                          onChangeText={(v) => setStartMin(onlyDigits(v).slice(0, 2))}
-                          keyboardType="number-pad"
-                          placeholder="00"
-                          placeholderTextColor={colors.placeholder}
-                        />
-                      </View>
-                      <TouchableOpacity style={[styles.ampmBtn, !startPm && styles.ampmBtnActive]} onPress={() => setStartPm(false)}>
-                        <Text style={[styles.ampmText, !startPm && styles.ampmTextActive]}>a. m.</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity style={[styles.ampmBtn, startPm && styles.ampmBtnActive]} onPress={() => setStartPm(true)}>
-                        <Text style={[styles.ampmText, startPm && styles.ampmTextActive]}>p. m.</Text>
-                      </TouchableOpacity>
-                    </View>
-                  </View>
-                  <View style={styles.timeRow}>
-                    <Text style={styles.timeRowLabel}>Fin</Text>
-                    <View style={styles.timeInputsRow}>
-                      <View style={styles.timeGroupInline}>
-                        <TextInput
-                          style={styles.timeInputSmall}
-                          value={endHour}
-                          onChangeText={(v) => setEndHour(onlyDigits(v).slice(0, 2))}
-                          keyboardType="number-pad"
-                          placeholder="00"
-                          placeholderTextColor={colors.placeholder}
-                        />
-                        <Text style={styles.timeColon}>-</Text>
-                        <TextInput
-                          style={styles.timeInputSmall}
-                          value={endMin}
-                          onChangeText={(v) => setEndMin(onlyDigits(v).slice(0, 2))}
-                          keyboardType="number-pad"
-                          placeholder="00"
-                          placeholderTextColor={colors.placeholder}
-                        />
-                      </View>
-                      <TouchableOpacity style={[styles.ampmBtn, !endPm && styles.ampmBtnActive]} onPress={() => setEndPm(false)}>
-                        <Text style={[styles.ampmText, !endPm && styles.ampmTextActive]}>a. m.</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity style={[styles.ampmBtn, endPm && styles.ampmBtnActive]} onPress={() => setEndPm(true)}>
-                        <Text style={[styles.ampmText, endPm && styles.ampmTextActive]}>p. m.</Text>
-                      </TouchableOpacity>
-                    </View>
-                  </View>
-                </>
-              ) : null}
-            </View>
-            </View>
-
-            <View style={styles.sectionBlock}>
-              <Text style={styles.sectionTitleBordered}>Fecha</Text>
-              <View style={[styles.row, { marginBottom: 0 }]}>
-                <Text style={styles.dateInfo}>{dateISO ? formatDateFull(dateISO) : '—'}</Text>
-              </View>
-            </View>
-
-            <View
-              onLayout={(e) => {
-                alarmSectionY.current = e.nativeEvent.layout.y;
-              }}
+          <TouchableOpacity style={styles.newEventBackdrop} activeOpacity={1} onPress={onClose} />
+          <View style={styles.detailsCenterCard}>
+            <ScrollView
+              ref={detailsScrollRef}
+              style={styles.pdScroll}
+              contentContainerStyle={styles.pdBodyPad}
+              keyboardShouldPersistTaps="handled"
+              keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+              automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
+              nestedScrollEnabled={false}
             >
-              <View style={styles.sectionBlock}>
-                <Text style={styles.sectionTitleBordered}>Alarma</Text>
-                {noTime ? (
-                  <Text style={[styles.label, { marginBottom: 4 }]}>No disponible sin hora.</Text>
-                ) : null}
-                <View style={styles.checkboxRow}>
+              <View style={styles.pdRow}>
+                <Text style={styles.pdLabel}>Hora:</Text>
+                <View style={styles.pdFieldBox}>
                   <TouchableOpacity
-                    style={[styles.checkbox, alarm && styles.checkboxChecked, noTime && { opacity: 0.4 }]}
+                    activeOpacity={0.75}
+                    onPress={openDetailsPalmPicker}
+                    accessibilityRole="button"
+                    accessibilityLabel="Hora del evento"
+                  >
+                    {!noTime && allDay ? (
+                      <>
+                        <Text style={styles.pdFieldText}>Todo el día</Text>
+                        <Text style={[styles.pdFieldText, { fontSize: fs(11), marginTop: 4, opacity: 0.92 }]}>
+                          {allDayRangeSummary}
+                        </Text>
+                      </>
+                    ) : noTime ? (
+                      <Text style={styles.pdFieldText}>Sin hora</Text>
+                    ) : (
+                      <Text style={styles.pdFieldText}>{editTimeSummary}</Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              <View style={styles.pdRow}>
+                <Text style={styles.pdLabel}>Fecha:</Text>
+                <TouchableOpacity
+                  style={styles.pdFieldBox}
+                  activeOpacity={0.75}
+                  onPress={() => setDatePickerVisible(true)}
+                  accessibilityRole="button"
+                  accessibilityLabel="Elegir fecha del evento"
+                >
+                  <Text style={[styles.pdFieldText, { marginBottom: 0 }]}>
+                    {dateISO ? formatDateFull(dateISO) : '—'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              <View
+                onLayout={(e) => {
+                  alarmSectionY.current = e.nativeEvent.layout.y;
+                }}
+              >
+                <View style={styles.pdCheckboxRow}>
+                  <Text style={styles.pdLabel}>Alarma:</Text>
+                  <TouchableOpacity
+                    style={[styles.checkbox, alarm && !noTime && styles.checkboxChecked, noTime && { opacity: 0.45 }]}
                     onPress={() => {
                       if (!noTime) toggleAlarm();
                     }}
                     disabled={noTime}
+                    accessibilityRole="checkbox"
+                    accessibilityState={{ checked: alarm && !noTime, disabled: noTime }}
                   >
-                    {alarm && <Text style={{ color: colors.onAccentBg, fontSize: fs(14) }}>✓</Text>}
+                    {alarm && !noTime ? (
+                      <Text style={{ color: colors.onAccentBg, fontSize: fs(13) }}>✓</Text>
+                    ) : null}
                   </TouchableOpacity>
-                  <Text style={[styles.label, noTime && { opacity: 0.5 }]}>Activar alarma</Text>
                 </View>
                 {alarm && !noTime ? (
-                  <View style={styles.alarmOptionsBlock}>
-                    <Text style={styles.alarmAnticipationLabel}>Anticipación (antes del inicio)</Text>
-                    <View style={styles.alarmAnticipationRow}>
-                      <TextInput
-                        style={styles.alarmOffsetInput}
-                        value={alarmOffsetStr}
-                        onChangeText={(v) => setAlarmOffsetStr(onlyDigits(v).slice(0, 4))}
-                        keyboardType="number-pad"
-                        placeholder="0"
-                        placeholderTextColor={colors.placeholder}
-                        accessibilityLabel="Cantidad de tiempo antes del evento"
-                      />
-                      <TouchableOpacity
-                        style={styles.alarmUnitTrigger}
-                        onPress={() => setAlarmUnitPickerVisible(true)}
-                        accessibilityRole="button"
-                        accessibilityLabel="Unidad de tiempo: minutos, horas o días"
-                      >
-                        <Text style={styles.alarmUnitTriggerText}>{alarmUnitLabel}</Text>
-                        <Text style={styles.alarmUnitChevron}>▼</Text>
-                      </TouchableOpacity>
-                    </View>
+                  <View style={{ marginLeft: 72, marginBottom: 8, flexDirection: 'row', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+                    <TextInput
+                      style={styles.alarmOffsetInput}
+                      value={alarmOffsetStr}
+                      onChangeText={(v) => setAlarmOffsetStr(onlyDigits(v).slice(0, 4))}
+                      keyboardType="number-pad"
+                      placeholder="0"
+                      placeholderTextColor={colors.placeholder}
+                      accessibilityLabel="Anticipación de la alarma"
+                    />
+                    <TouchableOpacity
+                      style={styles.alarmUnitTrigger}
+                      onPress={() => setAlarmUnitPickerVisible(true)}
+                      accessibilityRole="button"
+                    >
+                      <Text style={styles.alarmUnitTriggerText}>{alarmUnitLabel}</Text>
+                      <Text style={styles.alarmUnitChevron}>▼</Text>
+                    </TouchableOpacity>
                   </View>
                 ) : null}
               </View>
-            </View>
 
-            <View style={[styles.sectionBlock, { marginBottom: 4 }]}>
-              <Text style={styles.sectionTitleBordered}>Repetir</Text>
-              <TouchableOpacity
-                style={styles.optionRow}
-                onPress={() => setRepeatModalVisible(true)}
-                activeOpacity={0.7}
-                accessibilityRole="button"
-                accessibilityLabel="Cambiar repetición"
-              >
-                <Text
-                  style={[styles.dateInfo, { flex: 1 }, repeat === 'none' && { color: colors.textSecondary }]}
-                  numberOfLines={2}
+              <View style={styles.pdRow}>
+                <Text style={styles.pdLabel}>Repetir:</Text>
+                <TouchableOpacity
+                  style={styles.pdFieldBox}
+                  onPress={() => setRepeatModalVisible(true)}
+                  activeOpacity={0.75}
+                  accessibilityRole="button"
+                  accessibilityLabel="Cambiar repetición"
                 >
-                  {repeat === 'none' ? 'No' : buildRepeatSummary(repeat ?? 'none', repeatInterval, repeatEndDate)}
-                </Text>
-                <Text style={{ fontSize: fs(18), color: colors.textSecondary, fontWeight: '600' }}>›</Text>
+                  <Text style={styles.pdFieldText}>
+                    {repeat === 'none' ? 'No' : buildRepeatSummary(repeat ?? 'none', repeatInterval, repeatEndDate)}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+            </ScrollView>
+
+            <View style={[styles.actions, { marginTop: 4, paddingTop: 12 }]}>
+              <TouchableOpacity style={[styles.btn, styles.btnPrimary]} onPress={() => void handleOK()}>
+                <Text style={[styles.btnText, styles.btnTextPrimary]}>OK</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.btn} onPress={onClose}>
+                <Text style={styles.btnText}>Cancelar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.btn}
+                onPress={handleDeletePress}
+                disabled={!onDelete}
+              >
+                <Text style={[styles.btnTextDanger, !onDelete && { opacity: 0.35 }]}>Eliminar…</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.btn} onPress={openNoteModal}>
+                <Text style={styles.btnText}>Nota</Text>
               </TouchableOpacity>
             </View>
-          </ScrollView>
-          <View style={styles.actions}>
-            <TouchableOpacity style={[styles.btn, styles.btnPrimary]} onPress={handleOK}>
-              <Text style={[styles.btnText, styles.btnTextPrimary]}>OK</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.btn} onPress={onClose}>
-              <Text style={styles.btnText}>Cancelar</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.btn} onPress={openNoteModal}>
-              <Text style={styles.btnText}>Nota</Text>
-            </TouchableOpacity>
           </View>
-        </View>
+        </KeyboardAvoidingView>
+        ) : (
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.overlayCenter}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? Math.max(insets.top, 12) : 0}
+        >
+          <TouchableOpacity style={styles.newEventBackdrop} activeOpacity={1} onPress={onClose} />
+          <View style={styles.newEventCard}>
+                <View style={[styles.header, { marginBottom: 12 }]}>
+                  <Text style={styles.headerTitle}>Nuevo</Text>
+                </View>
+                {renderPalmTimePickers(() => void handleOK(), onClose)}
+          </View>
+        </KeyboardAvoidingView>
+        )}
+      </Modal>
+
+      <Modal
+        visible={reminder != null && detailsPalmPickerVisible}
+        animationType="fade"
+        transparent
+        onRequestClose={() => closeDetailsPalmPicker(false)}
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.overlayCenter}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? Math.max(insets.top, 12) : 0}
+        >
+          <TouchableOpacity
+            style={styles.newEventBackdrop}
+            activeOpacity={1}
+            onPress={() => closeDetailsPalmPicker(false)}
+          />
+          <View style={styles.newEventCard}>
+            <View style={[styles.header, { marginBottom: 12 }]}>
+              <Text style={styles.headerTitle}>Hora</Text>
+            </View>
+            {renderPalmTimePickers(
+              () => closeDetailsPalmPicker(true),
+              () => closeDetailsPalmPicker(false)
+            )}
+          </View>
         </KeyboardAvoidingView>
       </Modal>
 
@@ -904,6 +1593,15 @@ export function EventDetailsModal({
           </View>
         </View>
       </Modal>
+
+      <GoToDateModal
+        visible={datePickerVisible}
+        title="Elegir fecha"
+        initialDate={dateISO || defaultDate}
+        reminders={[]}
+        onSelectDate={(d) => setDateISO(d)}
+        onClose={() => setDatePickerVisible(false)}
+      />
 
       <ChangeRepeatModal
         visible={repeatModalVisible}

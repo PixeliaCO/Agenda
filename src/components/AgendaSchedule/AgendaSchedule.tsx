@@ -4,7 +4,7 @@
  * que ocupan el rango entre hora de inicio y fin (duración visible).
  */
 
-import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef, type ElementRef } from 'react';
 import {
   View,
   Text,
@@ -87,6 +87,8 @@ export type AgendaScheduleProps = {
   onTitleEditChange?: (text: string) => void;
   /** Guardar título o borrar si quedó vacío; debe ser síncrono respecto al estado del padre */
   onCommitTitleEdit?: () => boolean;
+  /** Tras crear un evento: desplazar el scroll a la hora de inicio (`startMinutes` null = arriba del día). */
+  scrollFocusRequest?: { token: number; startMinutes: number | null } | null;
 };
 
 function getRowStartMin(hours: readonly string[], hourMinutes: number[] | undefined, i: number): number {
@@ -233,10 +235,15 @@ export function AgendaSchedule({
   titleEditDraft = '',
   onTitleEditChange,
   onCommitTitleEdit,
+  scrollFocusRequest = null,
 }: AgendaScheduleProps) {
   const { colors, fontScale } = usePreferences();
   const insets = useSafeAreaInsets();
   const scrollRef = useRef<ScrollView>(null);
+  /** Enfoque explícito: tras cerrar un modal, `autoFocus` en el `TextInput` del título suele fallar. */
+  const titleEditInputRef = useRef<ElementRef<typeof TextInput> | null>(null);
+  const [pinnedHeaderHeight, setPinnedHeaderHeight] = useState(0);
+  const lastScrollFocusTokenRef = useRef(0);
   const [keyboardBottomPad, setKeyboardBottomPad] = useState(0);
   const [inlineTitle, setInlineTitle] = useState('');
   const inlineCommittedRef = useRef(false);
@@ -257,6 +264,15 @@ export function AgendaSchedule({
       inlineCommittedRef.current = false;
     }
   }, [inlineSlot]);
+
+  useEffect(() => {
+    if (!titleEditReminderId) return undefined;
+    const delay = Platform.OS === 'android' ? 320 : 220;
+    const t = setTimeout(() => {
+      titleEditInputRef.current?.focus();
+    }, delay);
+    return () => clearTimeout(t);
+  }, [titleEditReminderId]);
 
   const tryCommitInline = useCallback(
     (hourLabel: string, hourIndex: number) => {
@@ -354,6 +370,34 @@ export function AgendaSchedule({
   const { laneById, maxLanes } = useMemo(() => assignEventLanes(reminders), [reminders]);
 
   const hasPinned = pinNoTime.length > 0;
+
+  useEffect(() => {
+    if (!hasPinned) setPinnedHeaderHeight(0);
+  }, [hasPinned]);
+
+  useEffect(() => {
+    const req = scrollFocusRequest;
+    if (!req) return;
+    if (req.token === lastScrollFocusTokenRef.current) return;
+    lastScrollFocusTokenRef.current = req.token;
+
+    const run = () => {
+      const el = scrollRef.current;
+      if (!el) return;
+      if (req.startMinutes == null) {
+        el.scrollTo({ y: 0, animated: true });
+        return;
+      }
+      const yGrid = yFromMinute(req.startMinutes, hours, hourMinutes, rowLayout);
+      const topPad = pinnedHeaderHeight;
+      const y = Math.max(0, topPad + yGrid - 120);
+      el.scrollTo({ y, animated: true });
+    };
+
+    requestAnimationFrame(() => {
+      requestAnimationFrame(run);
+    });
+  }, [scrollFocusRequest, hours, hourMinutes, rowLayout, pinnedHeaderHeight]);
 
   /**
    * Una fila visual por cada "inicio" en esa hora: si hay 2 eventos a las 6:00, hay 2 filas con etiqueta "6:00".
@@ -706,6 +750,7 @@ export function AgendaSchedule({
           minHeight: 36,
           borderWidth: 0,
           borderRadius: 0,
+          borderColor: 'transparent',
           paddingHorizontal: 10,
           paddingVertical: 8,
           fontSize: fs(14),
@@ -713,6 +758,7 @@ export function AgendaSchedule({
           fontWeight: 'normal',
           color: colors.text,
           backgroundColor: colors.cardBackground,
+          ...(Platform.OS === 'web' ? ({ outlineStyle: 'none' as const, outlineWidth: 0 } as const) : {}),
         },
       }),
     [
@@ -734,16 +780,23 @@ export function AgendaSchedule({
       return (
         <View
           key={r.id}
-          style={[styles.pinnedRow, isSelected && styles.pinnedRowSelected]}
+          style={[
+            styles.pinnedRow,
+            isSelected && r.id !== titleEditReminderId && styles.pinnedRowSelected,
+          ]}
         >
           <TextInput
+            ref={titleEditInputRef}
             style={styles.inlineInput}
             value={titleEditDraft}
             onChangeText={onTitleEditChange}
             autoFocus
-            selectTextOnFocus
+            showSoftInputOnFocus
             returnKeyType="done"
             blurOnSubmit
+            underlineColorAndroid="transparent"
+            cursorColor={colors.text}
+            selectionColor={colors.textSecondary}
             onSubmitEditing={() => onCommitTitleEdit?.()}
             onBlur={() => onCommitTitleEdit?.()}
           />
@@ -754,7 +807,10 @@ export function AgendaSchedule({
     return (
       <View
         key={r.id}
-        style={[styles.pinnedRow, isSelected && styles.pinnedRowSelected]}
+        style={[
+          styles.pinnedRow,
+          isSelected && r.id !== titleEditReminderId && styles.pinnedRowSelected,
+        ]}
       >
         <EventTitleWithIcons
           title={r.title}
@@ -802,12 +858,15 @@ export function AgendaSchedule({
         style={styles.scroll}
         contentContainerStyle={[styles.scrollContent, { paddingBottom: scrollPadBottom }]}
         showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
+        keyboardShouldPersistTaps="always"
         keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
         automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
       >
       {hasPinned ? (
-        <View style={styles.pinnedWrap}>
+        <View
+          style={styles.pinnedWrap}
+          onLayout={(e) => setPinnedHeaderHeight(e.nativeEvent.layout.height)}
+        >
           {pinNoTime.length > 0 ? (
             <View style={styles.pinnedBlock}>
               <View style={styles.pinnedHeadingIconRow} accessibilityRole="header">
@@ -950,6 +1009,9 @@ export function AgendaSchedule({
                             autoFocus
                             returnKeyType="done"
                             blurOnSubmit
+                            underlineColorAndroid="transparent"
+                            cursorColor={colors.text}
+                            selectionColor={colors.textSecondary}
                             onSubmitEditing={() => tryCommitInline(hourLabel, hourIndex)}
                             onBlur={() => tryCommitInline(hourLabel, hourIndex)}
                           />
@@ -965,7 +1027,9 @@ export function AgendaSchedule({
                                     key={r.id}
                                     style={[
                                       styles.eventTextRow,
-                                      isSelected && styles.eventTextRowSelected,
+                                      isSelected &&
+                                        r.id !== titleEditReminderId &&
+                                        styles.eventTextRowSelected,
                                       {
                                         minHeight: titleRowMinH,
                                         paddingVertical: titlePadV,
@@ -973,13 +1037,17 @@ export function AgendaSchedule({
                                     ]}
                                   >
                                     <TextInput
+                                      ref={titleEditInputRef}
                                       style={styles.inlineInput}
                                       value={titleEditDraft}
                                       onChangeText={onTitleEditChange}
                                       autoFocus
-                                      selectTextOnFocus
+                                      showSoftInputOnFocus
                                       returnKeyType="done"
                                       blurOnSubmit
+                                      underlineColorAndroid="transparent"
+                                      cursorColor={colors.text}
+                                      selectionColor={colors.textSecondary}
                                       onSubmitEditing={() => onCommitTitleEdit?.()}
                                       onBlur={() => onCommitTitleEdit?.()}
                                     />
