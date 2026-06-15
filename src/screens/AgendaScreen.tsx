@@ -5,7 +5,7 @@
  */
 
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { DeviceEventEmitter, View, StyleSheet, Alert, Keyboard, Platform, InteractionManager } from 'react-native';
+import { DeviceEventEmitter, View, StyleSheet, Alert, Keyboard, Platform, InteractionManager, AppState } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { runOnJS } from 'react-native-reanimated';
 import { StatusBar } from 'expo-status-bar';
@@ -37,6 +37,7 @@ import {
   syncReminderNotification,
   cancelNotificationsForReminder,
   REMINDER_DELETED_FROM_NOTIFICATION,
+  resyncAllScheduledNotifications,
 } from '../services/localNotificationService';
 import { runStartupPermissionFlow } from '../services/startupPermissionsService';
 import { getDaySchedule } from '../services/dayScheduleService';
@@ -97,6 +98,23 @@ export function AgendaScreen() {
     };
   }, []);
 
+  /** Android: al volver a primer plano (Ajustes, otra app), reprogramar alarmas. */
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    let t: ReturnType<typeof setTimeout> | undefined;
+    const sub = AppState.addEventListener('change', (next) => {
+      if (next !== 'active') return;
+      if (t) clearTimeout(t);
+      t = setTimeout(() => {
+        void resyncAllScheduledNotifications();
+      }, 600);
+    });
+    return () => {
+      sub.remove();
+      if (t) clearTimeout(t);
+    };
+  }, []);
+
   const selectedDayIndex = getDayIndexFromDate(selectedDate);
   const displayDate = formatDateFull(selectedDate);
 
@@ -115,15 +133,17 @@ export function AgendaScreen() {
     loadReminders();
   }, [loadReminders]);
 
+  /** Notifee + canales: solo al montar. Borrar/recargar canal en cada cambio de día cancelaba triggers en Android. */
   useEffect(() => {
     let cancelled = false;
     (async () => {
       await runStartupPermissionFlow();
       if (cancelled) return;
       await initLocalNotifications();
-      // Resync: asegura que lo programado coincide con lo guardado en local.
+      if (cancelled) return;
       const all = await getAllReminders();
-      await Promise.all(all.map((r) => syncReminderNotification(r)));
+      if (cancelled) return;
+      await Promise.all(all.map((r) => syncReminderNotification(r, { preservePostponeSnoozes: true })));
     })();
     return () => {
       cancelled = true;

@@ -11,6 +11,13 @@ npm run start
 
 Escanea el código QR con Expo Go para abrir la app en el dispositivo.
 
+## Probar alarmas en Android sin gastar builds EAS en la nube
+
+- **`npx expo run:android`**: genera `android/` si hace falta, compila e instala por USB en un solo paso (cuota local, no el límite de builds EAS en la nube).
+- **`eas build --local`**: mismo AAB/APK que en la nube pero en tu PC (requiere entorno Android configurado).
+
+La app usa **parches nativos** (`patch-package`) y **plugins**; los cambios en JS/TS se pueden iterar con Metro, pero todo lo que toque Kotlin/manifest necesita al menos un `expo run:android` o build local.
+
 ## Estructura del proyecto
 
 El código está organizado por capas para mantener una arquitectura clara y escalable:
@@ -24,6 +31,8 @@ El código está organizado por capas para mantener una arquitectura clara y esc
 | `src/types/` | Tipos TypeScript compartidos. |
 
 La documentación detallada de la arquitectura está en [docs/ARQUITECTURA.md](docs/ARQUITECTURA.md).
+
+Si los usuarios reportan **alarmas retrasadas o silenciosas en Android**, conviene revisar [docs/ALARMAS_ANDROID.md](docs/ALARMAS_ANDROID.md).
 
 ## Tecnologías
 

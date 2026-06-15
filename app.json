@@ -21,7 +21,8 @@
         "android.permission.SCHEDULE_EXACT_ALARM",
         "android.permission.POST_NOTIFICATIONS",
         "android.permission.VIBRATE",
-        "android.permission.WAKE_LOCK"
+        "android.permission.WAKE_LOCK",
+        "android.permission.USE_FULL_SCREEN_INTENT"
       ],
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
@@ -32,14 +33,8 @@
     },
     "plugins": [
       "./plugins/withAgendaSystemAlarmChannel.js",
-      [
-        "expo-notifications",
-        {
-          "sounds": [
-            "./assets/sounds/alert.mp3"
-          ]
-        }
-      ]
+      "./plugins/withAgendaFullScreenAlarm.js",
+      "./plugins/withAgendaAlarmLockscreen.js"
     ],
     "web": {
       "favicon": "./assets/LogoApp.png"
@@ -49,6 +44,12 @@
         "projectId": "f0c44808-f1ba-4512-bb4b-0feedb02bf33"
       }
     },
-    "owner": "andresfr"
+    "owner": "andresfr",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/f0c44808-f1ba-4512-bb4b-0feedb02bf33"
+    }
   }
 }

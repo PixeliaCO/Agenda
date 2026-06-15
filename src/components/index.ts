@@ -11,5 +11,4 @@ export { MonthView } from './MonthView';
 export { DaySummaryView } from './DaySummaryView';
 export { GoToDateModal } from './GoToDateModal';
 export { OptionsModal } from './OptionsModal';
-export { ReminderForm } from './ReminderForm';
 export { EventDetailsModal } from './EventDetailsModal';

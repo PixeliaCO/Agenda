@@ -1,5 +1,10 @@
 import 'react-native-gesture-handler';
+/** Notifee: registrar `onBackgroundEvent` antes del componente raíz (alarmas con app en segundo plano / cerrada). */
+import './notifeeBackground';
+import { ensureAgendaAlarmBridgeListener } from './src/services/localNotificationService';
 import { registerRootComponent } from 'expo';
+
+ensureAgendaAlarmBridgeListener();
 
 import App from './App';
 

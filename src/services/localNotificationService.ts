@@ -1,66 +1,222 @@
 /**
- * Notificaciones locales para alarmas de eventos (sin servidor).
+ * Notificaciones locales con Notifee — solo Android (dev build / prebuild; no Expo Go).
  * Siempre: aviso con alarma a la hora de inicio. Con "Activar alarma": además aviso de anticipación.
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import Constants from 'expo-constants';
+import Constants, { ExecutionEnvironment } from 'expo-constants';
 import * as IntentLauncher from 'expo-intent-launcher';
-import { DeviceEventEmitter, Platform } from 'react-native';
-import type { EventSubscription } from 'expo-modules-core';
-import * as Notifications from 'expo-notifications';
+import notifee, {
+  AlarmType,
+  AndroidCategory,
+  AndroidFlags,
+  AndroidImportance,
+  AndroidNotificationSetting,
+  AndroidVisibility,
+  AuthorizationStatus,
+  EventType,
+  RepeatFrequency,
+  TriggerType,
+  type Event,
+  type Notification,
+  type TimestampTrigger,
+} from '@notifee/react-native';
+import { DeviceEventEmitter, NativeModules, Platform, type EmitterSubscription } from 'react-native';
 import type { Reminder } from '../types/reminder';
 import { formatTime12h } from '../utils/date';
-import { deleteReminder } from './reminderService';
+import { deleteReminder, getAllReminders, getReminderById } from './reminderService';
 
 /** Emite al borrar un evento desde la notificación (Eliminar); la UI debe refrescar. */
 export const REMINDER_DELETED_FROM_NOTIFICATION = 'agenda:reminder-deleted';
 
-/** Anticipación: canal con sonido `alert` (res/raw) del bundle. */
-const ANDROID_CHANNEL_ANTICIPATION = 'agenda-anticipation-alert';
-/**
- * Inicio del evento (Android): canal creado en nativo con URI a `res/raw/alert` (alert.mp3 vía prebuild).
- * iOS: mismo archivo en el bundle (plugin expo-notifications).
- */
-const ANDROID_CHANNEL_EVENT_START = 'agenda-event-phone-alarm';
-/** Nombre del archivo en el bundle (iOS y referencia Android en contenido). */
-const EVENT_START_SOUND_FILE = 'alert.mp3';
-/** Mismo sonido para recordatorio de anticipación. */
-const ANTICIPATION_SOUND_FILE = 'alert.mp3';
+/** Puente nativo (AlarmLockscreenActivity → MainActivity → JS). */
+const NATIVE_ALARM_BRIDGE = 'agenda:alarm-bridge';
+
+type NativeAlarmBridgePayload = {
+  action: string;
+  reminderId: string;
+  alarmKind: 'anticipation' | 'start';
+  notificationId: string;
+  titleSnapshot: string;
+  startTimeSnapshot: string;
+  dateSnapshot: string;
+};
+
+/** Canal nativo de anticipación: mismo `raw/alert` y `USAGE_ALARM` que inicio (`AgendaSystemAlarmChannel` en prebuild). */
+const ANDROID_CHANNEL_ANTICIPATION = 'agenda-anticipation-phone-v5';
+/** Canal nativo de inicio (`AgendaSystemAlarmChannel` en prebuild): `res/raw/alert` + IMPORTANCE_MAX. */
+const ANDROID_CHANNEL_EVENT_START = 'agenda-event-phone-v5';
 
 const MAX_DATE_TRIGGERS = 32;
-
-/** Android 12–13: sin permiso de alarmas exactas, el SO retrasa disparos hasta abrir la app (setAndAllowWhileIdle). */
+const POSTPONE_MS = 5 * 60 * 1000;
 const ANDROID_EXACT_ALARM_PROMPT_KEY = 'agenda_android_exact_alarm_settings_prompt_v1';
+const ANDROID_EXTRA_APP_PACKAGE = 'android.provider.extra.APP_PACKAGE';
+
+/** Evita spam en consola si hay muchos recordatorios y alarmas exactas están desactivadas. */
+let warnedExactAlarmDisabled = false;
+
+/** Expo Go no incluye el binario nativo de Notifee como en `expo run:android`. */
+let warnedExpoGoNotifications = false;
+
+function isExpoGoEnvironment(): boolean {
+  try {
+    return Constants.executionEnvironment === ExecutionEnvironment.StoreClient;
+  } catch {
+    return false;
+  }
+}
+
+const ACTION_DEFAULT_PRESS = 'DEFAULT_PRESS';
+const ACTION_OK = 'OK';
+const ACTION_DETENER = 'DETENER';
+const ACTION_ELIMINAR = 'ELIMINAR';
+const ACTION_POSPONER = 'POSPONER';
 
 function androidApiLevel(): number {
   if (Platform.OS !== 'android') return 0;
   return typeof Platform.Version === 'number' ? Platform.Version : parseInt(String(Platform.Version), 10) || 0;
 }
 
+function getAndroidPackageName(): string | undefined {
+  return Constants.expoConfig?.android?.package;
+}
+
+export async function openAndroidAppNotificationSettings(): Promise<void> {
+  if (Platform.OS !== 'android') return;
+  const pkg = getAndroidPackageName();
+  if (!pkg) return;
+  try {
+    await IntentLauncher.startActivityAsync(IntentLauncher.ActivityAction.APP_NOTIFICATION_SETTINGS, {
+      extra: { [ANDROID_EXTRA_APP_PACKAGE]: pkg },
+    });
+  } catch {
+    try {
+      await IntentLauncher.startActivityAsync(IntentLauncher.ActivityAction.APPLICATION_DETAILS_SETTINGS, {
+        data: `package:${pkg}`,
+      });
+    } catch {
+      /* OEM */
+    }
+  }
+}
+
+export async function openAndroidAppDetailsSettings(): Promise<void> {
+  if (Platform.OS !== 'android') return;
+  const pkg = getAndroidPackageName();
+  if (!pkg) return;
+  try {
+    await IntentLauncher.startActivityAsync(IntentLauncher.ActivityAction.APPLICATION_DETAILS_SETTINGS, {
+      data: `package:${pkg}`,
+    });
+  } catch {
+    /* */
+  }
+}
+
+export async function openAndroidExactAlarmPermissionSettings(): Promise<void> {
+  if (Platform.OS !== 'android') return;
+  const pkg = getAndroidPackageName();
+  if (!pkg || androidApiLevel() < 31) return;
+  try {
+    await IntentLauncher.startActivityAsync(IntentLauncher.ActivityAction.REQUEST_SCHEDULE_EXACT_ALARM, {
+      data: `package:${pkg}`,
+    });
+  } catch {
+    /* */
+  }
+}
+
+export async function openAndroidManageFullScreenIntentSettings(): Promise<void> {
+  if (Platform.OS !== 'android') return;
+  const pkg = getAndroidPackageName();
+  if (!pkg || androidApiLevel() < 34) return;
+  try {
+    await IntentLauncher.startActivityAsync(IntentLauncher.ActivityAction.MANAGE_APP_USE_FULL_SCREEN_INTENT, {
+      data: `package:${pkg}`,
+    });
+  } catch {
+    try {
+      await IntentLauncher.startActivityAsync(IntentLauncher.ActivityAction.APPLICATION_DETAILS_SETTINGS, {
+        data: `package:${pkg}`,
+      });
+    } catch {
+      /* OEM */
+    }
+  }
+}
+
+export type AndroidAlarmWakeDiagnostics = {
+  /** POST_NOTIFICATIONS / permiso general de notificaciones */
+  postNotificationsAuthorized: boolean;
+  /** Programación con AlarmManager exacto (Android 12+); en API menores suele ser NOT_SUPPORTED */
+  alarmSchedulingEnabled: boolean;
+  androidApiLevel: number;
+  /** Canal nativo de anticipación (`agenda-anticipation-phone-v5`, mismo audio que inicio) */
+  anticipationChannelReady: boolean | null;
+  /** Canal nativo de inicio (`agenda-event-phone-v5`) */
+  startChannelReady: boolean | null;
+  /** Notifee triggers pendientes (anticipación + inicio + pospuestos) */
+  scheduledTriggerCount: number | null;
+};
+
 /**
- * Abre una sola vez la pantalla del sistema para permitir alarmas exactas (Android 12–13).
- * En Android 14+ suele bastar `USE_EXACT_ALARM` en el manifest.
+ * Comprueba requisitos mínimos para que disparen alarmas con pantalla apagada / bloqueo.
+ * No sustituye revisar Ajustes del sistema (batería, DND, pantalla completa en 14+).
  */
+export async function getAndroidAlarmWakeDiagnostics(): Promise<AndroidAlarmWakeDiagnostics | null> {
+  if (Platform.OS !== 'android') return null;
+  if (!isExpoGoEnvironment()) {
+    await initLocalNotifications();
+  }
+  const s = await notifee.getNotificationSettings();
+  const alarm = s.android.alarm;
+  const alarmSchedulingEnabled =
+    alarm === AndroidNotificationSetting.NOT_SUPPORTED || alarm === AndroidNotificationSetting.ENABLED;
+
+  let anticipationChannelReady: boolean | null = null;
+  let startChannelReady: boolean | null = null;
+  let scheduledTriggerCount: number | null = null;
+  if (!isExpoGoEnvironment()) {
+    try {
+      const chA = await notifee.getChannel(ANDROID_CHANNEL_ANTICIPATION);
+      anticipationChannelReady = chA != null;
+      const chS = await notifee.getChannel(ANDROID_CHANNEL_EVENT_START);
+      startChannelReady = chS != null;
+      const triggers = await notifee.getTriggerNotifications();
+      scheduledTriggerCount = triggers.length;
+    } catch {
+      /* Notifee no disponible o error nativo */
+    }
+  }
+
+  return {
+    postNotificationsAuthorized: notificationAuthorized(s),
+    alarmSchedulingEnabled,
+    androidApiLevel: androidApiLevel(),
+    anticipationChannelReady,
+    startChannelReady,
+    scheduledTriggerCount,
+  };
+}
+
 async function maybeOpenAndroidExactAlarmSettingsOnce(): Promise<void> {
   if (Platform.OS !== 'android') return;
   const api = androidApiLevel();
-  if (api < 31 || api >= 34) return;
+  if (api < 31) return;
   try {
     const done = await AsyncStorage.getItem(ANDROID_EXACT_ALARM_PROMPT_KEY);
     if (done === '1') return;
-    const pkg = Constants.expoConfig?.android?.package;
+    const pkg = getAndroidPackageName();
     if (!pkg) return;
     await IntentLauncher.startActivityAsync(IntentLauncher.ActivityAction.REQUEST_SCHEDULE_EXACT_ALARM, {
       data: `package:${pkg}`,
     });
     await AsyncStorage.setItem(ANDROID_EXACT_ALARM_PROMPT_KEY, '1');
   } catch {
-    /* usuario canceló o OEM sin esa pantalla */
+    /* */
   }
 }
 
-/** Datos embebidos para acciones de la notificación aunque el recordatorio no esté en memoria */
 type AlarmNotifPayload = {
   reminderId: string;
   alarmKind: 'anticipation' | 'start';
@@ -68,32 +224,6 @@ type AlarmNotifPayload = {
   startTimeSnapshot: string;
   dateSnapshot: string;
 };
-
-const CATEGORY_ALARM_START = 'agenda_alarm_start';
-const CATEGORY_ALARM_ANTICIPATION = 'agenda_alarm_anticipation';
-
-/** Detener alarma (cierra notificación / silencia). */
-const ACTION_DETENER = 'DETENER';
-/** Eliminar el evento y sus notificaciones programadas. */
-const ACTION_ELIMINAR = 'ELIMINAR';
-/** iOS: usuario descartó la notificación (equivale a Detener). */
-const IOS_DISMISS_ACTION = 'com.apple.UNNotificationDismissActionIdentifier';
-
-/** Misma categoría en iOS/Android: botones en la notificación */
-const ALARM_NOTIFICATION_ACTIONS: Notifications.NotificationAction[] = [
-  {
-    identifier: ACTION_DETENER,
-    buttonTitle: 'Detener',
-    options: { opensAppToForeground: true },
-  },
-  {
-    identifier: ACTION_ELIMINAR,
-    buttonTitle: 'Eliminar',
-    options: { opensAppToForeground: true, isDestructive: true },
-  },
-];
-
-let notificationResponseSubscription: EventSubscription | null = null;
 
 function payloadFromReminder(reminder: Reminder, alarmKind: 'anticipation' | 'start'): AlarmNotifPayload {
   return {
@@ -103,6 +233,88 @@ function payloadFromReminder(reminder: Reminder, alarmKind: 'anticipation' | 'st
     startTimeSnapshot: reminder.startTime,
     dateSnapshot: reminder.date,
   };
+}
+
+function toDataStrings(p: AlarmNotifPayload): Record<string, string> {
+  return {
+    reminderId: p.reminderId,
+    alarmKind: p.alarmKind,
+    titleSnapshot: p.titleSnapshot,
+    startTimeSnapshot: p.startTimeSnapshot,
+    dateSnapshot: p.dateSnapshot,
+  };
+}
+
+function getAlarmLockscreenLaunchActivity(): string | undefined {
+  const pkg = Constants.expoConfig?.android?.package;
+  if (!pkg) return undefined;
+  return `${pkg}.AlarmLockscreenActivity`;
+}
+
+function alarmKindFromNotificationData(n: Notification): 'anticipation' | 'start' {
+  const k = n.data?.alarmKind;
+  if (k === 'anticipation' || k === 'start') return k;
+  return 'start';
+}
+
+function primeNativeLockScreenPayload(reminder: Reminder, n: Notification): void {
+  const launch = getAlarmLockscreenLaunchActivity();
+  if (!launch || Platform.OS !== 'android') return;
+  const mod = NativeModules.AgendaAlarmNative as { primeLockScreenPayload?: (id: string, json: string) => void } | undefined;
+  const id = n.id;
+  if (!id || typeof mod?.primeLockScreenPayload !== 'function') return;
+  const kind = alarmKindFromNotificationData(n);
+  const p = payloadFromReminder(reminder, kind);
+  const payload = {
+    ...p,
+    displayTitle: n.title?.trim() || 'Evento',
+    displayBody: n.body ?? '',
+    notificationId: id,
+  };
+  try {
+    mod.primeLockScreenPayload(id, JSON.stringify(payload));
+  } catch {
+    /* */
+  }
+}
+
+async function handleNativeAlarmBridge(ev: unknown): Promise<void> {
+  if (!isAndroidNotifications()) return;
+  if (isExpoGoEnvironment()) return;
+  await initLocalNotifications();
+  const o = ev as Partial<NativeAlarmBridgePayload>;
+  const actionRaw = o.action;
+  const reminderId = o.reminderId;
+  const alarmKind = o.alarmKind;
+  const notificationId = o.notificationId ?? '';
+  if (typeof actionRaw !== 'string' || typeof reminderId !== 'string') return;
+  if (alarmKind !== 'anticipation' && alarmKind !== 'start') return;
+
+  const map: Record<string, string> = { OK: ACTION_OK, POSPONER: ACTION_POSPONER, ELIMINAR: ACTION_ELIMINAR };
+  const actionId = map[actionRaw] ?? ACTION_OK;
+
+  const notification: Notification = {
+    id: notificationId || undefined,
+    title: typeof o.titleSnapshot === 'string' ? o.titleSnapshot : 'Evento',
+    body: '',
+    data: toDataStrings({
+      reminderId,
+      alarmKind,
+      titleSnapshot: typeof o.titleSnapshot === 'string' ? o.titleSnapshot : 'Evento',
+      startTimeSnapshot: typeof o.startTimeSnapshot === 'string' ? o.startTimeSnapshot : '09:00',
+      dateSnapshot: typeof o.dateSnapshot === 'string' ? o.dateSnapshot : '2000-01-01',
+    }),
+  };
+  await handleAlarmInteraction(actionId, notification);
+}
+
+/** Registra el listener del puente nativo lo antes posible (p. ej. desde `index.ts`) para no perder eventos al arranque en frío. */
+export function ensureAgendaAlarmBridgeListener(): void {
+  if (!isAndroidNotifications() || isExpoGoEnvironment()) return;
+  if (alarmBridgeSub) return;
+  alarmBridgeSub = DeviceEventEmitter.addListener(NATIVE_ALARM_BRIDGE, (ev: unknown) => {
+    void handleNativeAlarmBridge(ev);
+  });
 }
 
 function parseAlarmPayload(data: Record<string, unknown> | undefined): AlarmNotifPayload | null {
@@ -124,47 +336,181 @@ function parseAlarmPayload(data: Record<string, unknown> | undefined): AlarmNoti
   };
 }
 
+function normalizeActionId(raw: string | undefined): string {
+  if (!raw) return '';
+  return raw;
+}
+
 function isAlarmAction(actionId: string): boolean {
   return (
+    actionId === ACTION_DEFAULT_PRESS ||
+    actionId === ACTION_OK ||
     actionId === ACTION_DETENER ||
     actionId === ACTION_ELIMINAR ||
-    actionId === IOS_DISMISS_ACTION
+    actionId === ACTION_POSPONER
   );
 }
 
-async function dismissPresentedNotification(response: Notifications.NotificationResponse): Promise<void> {
+async function dismissByNotificationId(notificationId: string | undefined): Promise<void> {
+  if (!notificationId) return;
   try {
-    await Notifications.dismissNotificationAsync(response.notification.request.identifier);
+    await notifee.cancelNotification(notificationId);
   } catch {
-    /* ya no está en la bandeja */
+    /* */
   }
 }
 
-async function handleAlarmNotificationResponse(response: Notifications.NotificationResponse): Promise<void> {
-  const actionId = response.actionIdentifier;
-  if (actionId === Notifications.DEFAULT_ACTION_IDENTIFIER) return;
-  if (!isAlarmAction(actionId)) return;
+/** Cancela triggers de anticipación principal (`agenda-a-{id}…`), no los pospuestos sueltos `agenda-ap-`. */
+async function cancelAnticipationTriggerIdsForReminder(reminderId: string): Promise<void> {
+  if (!isAndroidNotifications()) return;
+  try {
+    const triggers = await notifee.getTriggerNotifications();
+    const prefix = `agenda-a-${reminderId}`;
+    for (const t of triggers) {
+      const tid = t.notification.id;
+      if (!tid) continue;
+      if (tid.startsWith(`agenda-ap-${reminderId}-`) || tid === `agenda-ap-${reminderId}`) continue;
+      if (!tid.startsWith(prefix)) continue;
+      if (t.notification.data?.alarmKind !== 'anticipation') continue;
+      await notifee.cancelTriggerNotification(tid);
+    }
+  } catch {
+    /* */
+  }
+}
 
-  const payload = parseAlarmPayload(response.notification.request.content.data as Record<string, unknown>);
-  const isEliminar = actionId === ACTION_ELIMINAR;
-  const isDetener = actionId === ACTION_DETENER || actionId === IOS_DISMISS_ACTION;
+/** Cancela triggers de inicio (`agenda-s-{id}…`) salvo pospuestos `agenda-p-`. */
+async function cancelStartTriggerIdsForReminder(reminderId: string): Promise<void> {
+  if (!isAndroidNotifications()) return;
+  try {
+    const triggers = await notifee.getTriggerNotifications();
+    const prefix = `agenda-s-${reminderId}`;
+    for (const t of triggers) {
+      const tid = t.notification.id;
+      if (!tid || !tid.startsWith(prefix) || isPostponeSnoozeIdentifier(tid)) continue;
+      if (t.notification.data?.alarmKind !== 'start') continue;
+      await notifee.cancelTriggerNotification(tid);
+    }
+  } catch {
+    /* */
+  }
+}
 
-  if (isEliminar) {
-    if (!payload) return;
-    await cancelNotificationsForReminder(payload.reminderId);
-    await deleteReminder(payload.reminderId);
-    DeviceEventEmitter.emit(REMINDER_DELETED_FROM_NOTIFICATION, { reminderId: payload.reminderId });
-    await dismissPresentedNotification(response);
+async function handleAlarmInteraction(actionId: string, notification: Notification | undefined): Promise<void> {
+  const id = normalizeActionId(actionId);
+  if (!isAlarmAction(id)) return;
+
+  const payload = parseAlarmPayload(notification?.data as Record<string, unknown> | undefined);
+  const nid = notification?.id;
+
+  const isEliminar = id === ACTION_ELIMINAR;
+  const isPosponer = id === ACTION_POSPONER;
+  const isDismissOnly =
+    id === ACTION_OK || id === ACTION_DETENER || id === ACTION_DEFAULT_PRESS;
+
+  if (payload?.alarmKind === 'anticipation') {
+    if (isEliminar) {
+      await cancelNotificationsForReminder(payload.reminderId);
+      await deleteReminder(payload.reminderId);
+      DeviceEventEmitter.emit(REMINDER_DELETED_FROM_NOTIFICATION, { reminderId: payload.reminderId });
+      await dismissByNotificationId(nid);
+      return;
+    }
+    if (isPosponer) {
+      const r = await getReminderById(payload.reminderId);
+      if (r && !r.noTime) {
+        try {
+          await cancelAnticipationTriggerIdsForReminder(payload.reminderId);
+          const when = new Date(Date.now() + POSTPONE_MS);
+          const postponeAntId = `agenda-ap-${r.id}-${Date.now()}`;
+          await scheduleTrigger(
+            r,
+            postponeAntId,
+            {
+              type: TriggerType.TIMESTAMP,
+              timestamp: when.getTime(),
+              alarmManager: { type: AlarmType.SET_ALARM_CLOCK },
+            },
+            buildAnticipationNotification(r, postponeAntId, { includeActions: true })
+          );
+        } catch (e) {
+          console.warn('[Agenda] Error al posponer anticipación', e);
+        }
+      }
+      await dismissByNotificationId(nid);
+      return;
+    }
+    if (isDismissOnly) {
+      await dismissByNotificationId(nid);
+    }
     return;
   }
 
-  if (isDetener) {
-    await dismissPresentedNotification(response);
+  if (!payload || payload.alarmKind !== 'start') return;
+
+  if (isEliminar) {
+    await cancelNotificationsForReminder(payload.reminderId);
+    await deleteReminder(payload.reminderId);
+    DeviceEventEmitter.emit(REMINDER_DELETED_FROM_NOTIFICATION, { reminderId: payload.reminderId });
+    await dismissByNotificationId(nid);
+    return;
+  }
+
+  if (isPosponer) {
+    const r = await getReminderById(payload.reminderId);
+    if (r && !r.noTime) {
+      try {
+        await cancelStartTriggerIdsForReminder(payload.reminderId);
+        const when = new Date(Date.now() + POSTPONE_MS);
+        const postponeId = `agenda-p-${r.id}-${Date.now()}`;
+        await scheduleTrigger(
+          r,
+          postponeId,
+          {
+            type: TriggerType.TIMESTAMP,
+            timestamp: when.getTime(),
+            alarmManager: { type: AlarmType.SET_ALARM_CLOCK },
+          },
+          buildStartNotification(r, postponeId, { includeActions: true })
+        );
+      } catch (e) {
+        console.warn('[Agenda] Error al posponer alarma de inicio', e);
+      }
+    }
+    await dismissByNotificationId(nid);
+    return;
+  }
+
+  if (isDismissOnly) {
+    await dismissByNotificationId(nid);
   }
 }
 
-function isNativeMobile(): boolean {
-  return Platform.OS === 'ios' || Platform.OS === 'android';
+/**
+ * Llamado desde `notifeeBackground.ts` (headless JS). Debe resolver para que Notifee complete el evento.
+ */
+export async function handleNotifeeBackgroundEvent(event: Event): Promise<void> {
+  if (Platform.OS !== 'android') return;
+  const { type, detail } = event;
+  const { notification, pressAction } = detail;
+
+  if (type === EventType.ACTION_PRESS && pressAction?.id) {
+    await handleAlarmInteraction(pressAction.id, notification);
+    return;
+  }
+
+  if (type === EventType.PRESS && pressAction?.id) {
+    await handleAlarmInteraction(pressAction.id, notification);
+    return;
+  }
+
+  if (type === EventType.DISMISSED && notification) {
+    await handleAlarmInteraction(ACTION_OK, notification);
+  }
+}
+
+function isAndroidNotifications(): boolean {
+  return Platform.OS === 'android';
 }
 
 function offsetToMs(offset: number, unit: NonNullable<Reminder['alarmUnit']>): number {
@@ -178,7 +524,6 @@ function offsetToMs(offset: number, unit: NonNullable<Reminder['alarmUnit']>): n
   }
 }
 
-/** Inicio del evento en hora local (usa startTime; “todo el día” guarda el rango de la agenda) */
 function eventStartLocal(reminder: Reminder): Date {
   const [y, m, d] = reminder.date.split('-').map(Number);
   const [hh, mm] = reminder.startTime.split(':').map(Number);
@@ -221,196 +566,461 @@ function advanceDateISO(dateISO: string, repeat: NonNullable<Reminder['repeat']>
   return toDateISO(d);
 }
 
-/** Domingo=1 … sábado=7 (Expo weekly trigger) */
+/** Domingo=1 … sábado=7 (como en el antiguo trigger semanal de Expo) */
 function expoWeekdayFromDate(d: Date): number {
   return d.getDay() + 1;
 }
 
-function baseContent(
-  reminder: Reminder,
-  body: string,
-  alarmKind: 'anticipation' | 'start'
-): Notifications.NotificationContentInput {
-  const title = reminder.title?.trim() || 'Evento';
-  const p = payloadFromReminder(reminder, alarmKind);
+function expoWeekdayToJsDay(weekdayExpo: number): number {
+  return weekdayExpo === 7 ? 6 : weekdayExpo - 1;
+}
+
+/** Próxima ejecución diaria a hour:minute (>= from). */
+function nextDailyTimestamp(hour: number, minute: number, fromMs: number): number {
+  const base = new Date(fromMs);
+  const d = new Date(base);
+  d.setHours(hour, minute, 0, 0);
+  if (d.getTime() <= base.getTime()) {
+    d.setDate(d.getDate() + 1);
+  }
+  return d.getTime();
+}
+
+/** Próxima ejecución semanal (weekdayExpo 1–7) a hour:minute (>= from). */
+function nextWeeklyTimestamp(weekdayExpo: number, hour: number, minute: number, fromMs: number): number {
+  const targetDow = expoWeekdayToJsDay(weekdayExpo);
+  const base = new Date(fromMs);
+  const d = new Date(base);
+  d.setHours(hour, minute, 0, 0);
+  const current = base.getDay();
+  let add = (targetDow - current + 7) % 7;
+  if (add === 0 && d.getTime() <= base.getTime()) add = 7;
+  d.setDate(d.getDate() + add);
+  return d.getTime();
+}
+
+function androidAlarmTriggerBase(): Pick<TimestampTrigger, 'alarmManager'> {
+  return { alarmManager: { type: AlarmType.SET_ALARM_CLOCK } };
+}
+
+function formatNotifeeScheduleError(e: unknown): string {
+  if (e && typeof e === 'object') {
+    const o = e as Record<string, unknown>;
+    const native = o.nativeErrorMessage ?? o.nativeErrorCode;
+    if (native != null) return `${o.message ?? 'Error'} (${String(native)})`;
+    if (typeof o.message === 'string') return o.message;
+  }
+  return String(e);
+}
+
+/**
+ * Quita solo full-screen intent (suele fallar sin permiso en API 34+).
+ * Mantiene acciones, `lightUpScreen`, categoría alarma y vibración para que sigan visibles los botones y el intento de encender pantalla.
+ */
+function stripFullScreenIntentOnly(n: Notification): Notification {
+  const a = n.android ? { ...n.android } : undefined;
+  if (!a) return n;
+  const next = { ...a };
+  delete (next as { fullScreenAction?: unknown }).fullScreenAction;
+  if (!next.pressAction) {
+    next.pressAction = { id: ACTION_DEFAULT_PRESS, launchActivity: 'default' };
+  }
+  return { ...n, android: next };
+}
+
+/** Quita solo acciones rápidas; mantiene fullScreen, lightUpScreen y categoría alarma. */
+function stripActionsOnly(n: Notification): Notification {
+  const a = n.android ? { ...n.android } : undefined;
+  if (!a) return n;
+  const next = { ...a };
+  delete (next as { actions?: unknown }).actions;
+  return { ...n, android: next };
+}
+
+/**
+ * Refuerzo de despertar / alarma: sonido insistente, tono en bucle, timestamp visible.
+ * En API menores a 26 fuerza importancia alta (sin canales).
+ */
+function withAlarmWakeBoost(n: Notification, fireAtMs?: number): Notification {
+  const a = n.android ? { ...n.android } : undefined;
+  if (!a) return n;
+  const prevFlags = a.flags ?? [];
+  const merged = [...prevFlags];
+  if (!merged.includes(AndroidFlags.FLAG_INSISTENT)) {
+    merged.push(AndroidFlags.FLAG_INSISTENT);
+  }
+  const api = androidApiLevel();
+  const next: Notification['android'] = {
+    ...a,
+    flags: merged,
+    loopSound: true,
+    ...(api > 0 && api < 26 ? { importance: AndroidImportance.HIGH } : {}),
+    ...(typeof fireAtMs === 'number' && fireAtMs > 0
+      ? { showTimestamp: true, timestamp: fireAtMs }
+      : {}),
+  };
+  return { ...n, android: next };
+}
+
+function stripFullScreenAndActionsKeepWakeUi(n: Notification): Notification {
+  return stripActionsOnly(stripFullScreenIntentOnly(n));
+}
+
+function triggerFireTimestampMs(trigger: TimestampTrigger): number | undefined {
+  if (trigger.type !== TriggerType.TIMESTAMP) return undefined;
+  return typeof trigger.timestamp === 'number' ? trigger.timestamp : undefined;
+}
+
+/**
+ * Último recurso si aún falla `createTriggerNotification` (API / OEM).
+ * Prioriza que exista disparador; quita acciones, `lightUpScreen` e insistencia para maximizar compatibilidad.
+ */
+function stripHeavyAlarmAndroidUi(n: Notification): Notification {
+  const a = n.android ? { ...n.android } : undefined;
+  if (!a) return n;
+  const next = { ...a };
+  delete (next as { fullScreenAction?: unknown }).fullScreenAction;
+  delete (next as { lightUpScreen?: unknown }).lightUpScreen;
+  delete (next as { actions?: unknown }).actions;
+  delete (next as { vibrationPattern?: unknown }).vibrationPattern;
+  delete (next as { lights?: unknown }).lights;
+  delete (next as { loopSound?: unknown }).loopSound;
+  if (Array.isArray(next.flags)) {
+    next.flags = next.flags.filter((f) => f !== AndroidFlags.FLAG_INSISTENT);
+    if (next.flags.length === 0) delete (next as { flags?: unknown }).flags;
+  }
+  next.ongoing = false;
+  next.category = undefined;
+  if (!next.pressAction) {
+    next.pressAction = { id: ACTION_DEFAULT_PRESS, launchActivity: 'default' };
+  }
+  return { ...n, android: next };
+}
+
+function workManagerTimestampTrigger(from: TimestampTrigger): TimestampTrigger {
   return {
-    title,
+    type: TriggerType.TIMESTAMP,
+    timestamp: from.timestamp,
+    ...(from.repeatFrequency != null ? { repeatFrequency: from.repeatFrequency } : {}),
+  };
+}
+
+function notificationAuthorized(settings: { authorizationStatus: AuthorizationStatus }): boolean {
+  return (
+    settings.authorizationStatus === AuthorizationStatus.AUTHORIZED ||
+    settings.authorizationStatus === AuthorizationStatus.PROVISIONAL
+  );
+}
+
+type BuildNotifOpts = { includeActions?: boolean };
+
+function buildAnticipationNotification(reminder: Reminder, id: string, opts?: BuildNotifOpts): Notification {
+  const lockLa = getAlarmLockscreenLaunchActivity();
+  const when = reminder.allDay
+    ? `todo el día · ${formatTime12h(reminder.startTime)}`
+    : formatTime12h(reminder.startTime);
+  const p = payloadFromReminder(reminder, 'anticipation');
+  const body = `Recordatorio antes del inicio · ${when}`;
+  const base: Notification = {
+    id,
+    title: reminder.title?.trim() || 'Evento',
     body,
-    sound: true,
-    data: {
-      reminderId: p.reminderId,
-      alarmKind: p.alarmKind,
-      titleSnapshot: p.titleSnapshot,
-      startTimeSnapshot: p.startTimeSnapshot,
-      dateSnapshot: p.dateSnapshot,
+    data: toDataStrings(p),
+    android: {
+      channelId: ANDROID_CHANNEL_ANTICIPATION,
+      category: AndroidCategory.ALARM,
+      /** Hasta que el usuario pulse Ok (u otra acción); no afecta "Limpiar todo" y suele impedir el cierre con X. */
+      ongoing: true,
+      autoCancel: false,
+      visibility: AndroidVisibility.PUBLIC,
+      pressAction: { id: ACTION_DEFAULT_PRESS, launchActivity: 'default' },
+      fullScreenAction: lockLa
+        ? { id: 'agenda_fs_anticipation', launchActivity: lockLa }
+        : { id: 'agenda_fs_anticipation', launchActivity: 'default' },
+      vibrationPattern: [0, 400, 200, 400, 200, 400],
+      lights: ['#00FFFF', 300, 300],
+      lightUpScreen: true,
+      ...(opts?.includeActions !== false
+        ? {
+            actions: [
+              { title: 'Ok', pressAction: { id: ACTION_OK } },
+              { title: 'Eliminar', pressAction: { id: ACTION_ELIMINAR, launchActivity: 'default' } },
+              { title: 'Posponer', pressAction: { id: ACTION_POSPONER, launchActivity: 'default' } },
+            ],
+          }
+        : {}),
+    },
+  };
+  return base;
+}
+
+function buildStartNotification(reminder: Reminder, id: string, opts?: BuildNotifOpts): Notification {
+  const lockLa = getAlarmLockscreenLaunchActivity();
+  const body = reminder.allDay
+    ? `Todo el día · ${formatTime12h(reminder.startTime)}`
+    : `Empieza ahora · ${formatTime12h(reminder.startTime)}`;
+  const p = payloadFromReminder(reminder, 'start');
+  const actions =
+    opts?.includeActions === false
+      ? undefined
+      : [
+          { title: 'Ok', pressAction: { id: ACTION_OK } },
+          { title: 'Eliminar', pressAction: { id: ACTION_ELIMINAR, launchActivity: 'default' } },
+          { title: 'Posponer', pressAction: { id: ACTION_POSPONER, launchActivity: 'default' } },
+        ];
+  return {
+    id,
+    title: reminder.title?.trim() || 'Evento',
+    body,
+    data: toDataStrings(p),
+    android: {
+      channelId: ANDROID_CHANNEL_EVENT_START,
+      category: AndroidCategory.ALARM,
+      /** Persistente hasta Ok / Eliminar / Posponer. */
+      ongoing: true,
+      autoCancel: false,
+      visibility: AndroidVisibility.PUBLIC,
+      pressAction: { id: ACTION_DEFAULT_PRESS, launchActivity: 'default' },
+      fullScreenAction: lockLa
+        ? { id: 'agenda_fs', launchActivity: lockLa }
+        : { id: 'agenda_fs', launchActivity: 'default' },
+      vibrationPattern: [0, 400, 200, 400, 200, 400],
+      lights: ['#00FFFF', 300, 300],
+      lightUpScreen: true,
+      actions,
     },
   };
 }
 
-function buildAnticipationContent(reminder: Reminder): Notifications.NotificationContentInput {
-  const when = reminder.allDay
-    ? `todo el día · ${formatTime12h(reminder.startTime)}`
-    : formatTime12h(reminder.startTime);
-  return {
-    ...baseContent(reminder, `Recordatorio antes del inicio · ${when}`, 'anticipation'),
-    categoryIdentifier: CATEGORY_ALARM_ANTICIPATION,
-    autoDismiss: false,
-    sticky: false,
-    ...(Platform.OS === 'ios'
-      ? { interruptionLevel: 'active' as const, sound: ANTICIPATION_SOUND_FILE }
-      : {
-          priority: Notifications.AndroidNotificationPriority.HIGH,
-          sound: ANTICIPATION_SOUND_FILE,
-        }),
-  };
+let foregroundUnsub: (() => void) | null = null;
+let alarmBridgeSub: EmitterSubscription | null = null;
+
+/** Una sola ejecución por proceso: evita borrar canales dos veces y deja listo Notifee antes de `sync`. */
+let localNotificationsInitPromise: Promise<void> | null = null;
+
+/**
+ * Inicio y anticipación se crean en Kotlin con el mismo URI de sonido; aquí solo comprobamos que Notifee los vea.
+ */
+async function ensureNativeAlarmChannelsVisible(): Promise<void> {
+  try {
+    const start = await notifee.getChannel(ANDROID_CHANNEL_EVENT_START);
+    const ant = await notifee.getChannel(ANDROID_CHANNEL_ANTICIPATION);
+    if (start == null || ant == null) {
+      console.warn(
+        '[Agenda] Canales nativos de alarma incompletos (inicio o anticipación). Aplica prebuild / reinstala la app para regenerar AgendaSystemAlarmChannel.kt (SCHEMA 6).'
+      );
+    }
+  } catch {
+    /* */
+  }
 }
 
-function buildStartContent(reminder: Reminder): Notifications.NotificationContentInput {
-  const body = reminder.allDay
-    ? `Todo el día · ${formatTime12h(reminder.startTime)}`
-    : `Empieza ahora · ${formatTime12h(reminder.startTime)}`;
-  return {
-    ...baseContent(reminder, body, 'start'),
-    categoryIdentifier: CATEGORY_ALARM_START,
-    sound: EVENT_START_SOUND_FILE,
-    autoDismiss: false,
-    // Android: ongoing => no swipe; solo Detener/Eliminar
-    sticky: Platform.OS === 'android',
-    ...(Platform.OS === 'ios'
-      ? { interruptionLevel: 'timeSensitive' as const }
-      : {
-          priority: Notifications.AndroidNotificationPriority.MAX,
-        }),
-  };
-}
-
-/** Canal Android + handler en primer arranque */
 export async function initLocalNotifications(): Promise<void> {
-  if (!isNativeMobile()) return;
-
-  Notifications.setNotificationHandler({
-    handleNotification: async () => ({
-      shouldShowBanner: true,
-      shouldShowList: true,
-      shouldPlaySound: true,
-      shouldSetBadge: false,
-    }),
-  });
-
-  try {
-    const categoryOpts: Notifications.NotificationCategoryOptions | undefined =
-      Platform.OS === 'ios' ? { customDismissAction: true } : undefined;
-    await Notifications.setNotificationCategoryAsync(
-      CATEGORY_ALARM_START,
-      ALARM_NOTIFICATION_ACTIONS,
-      categoryOpts
-    );
-    await Notifications.setNotificationCategoryAsync(
-      CATEGORY_ALARM_ANTICIPATION,
-      ALARM_NOTIFICATION_ACTIONS,
-      categoryOpts
-    );
-  } catch {
-    /* categorías no disponibles en algunos entornos */
-  }
-
-  if (notificationResponseSubscription) {
-    notificationResponseSubscription.remove();
-    notificationResponseSubscription = null;
-  }
-  notificationResponseSubscription = Notifications.addNotificationResponseReceivedListener((response) => {
-    void handleAlarmNotificationResponse(response);
-  });
-
-  try {
-    const last = Notifications.getLastNotificationResponse();
-    if (
-      last != null &&
-      last.actionIdentifier !== Notifications.DEFAULT_ACTION_IDENTIFIER &&
-      isAlarmAction(last.actionIdentifier)
-    ) {
-      await handleAlarmNotificationResponse(last);
-      Notifications.clearLastNotificationResponse();
+  if (!isAndroidNotifications()) return;
+  if (isExpoGoEnvironment()) {
+    if (!warnedExpoGoNotifications) {
+      warnedExpoGoNotifications = true;
+      console.warn(
+        '[Agenda] Expo Go no ejecuta Notifee nativo. Instala la app con `npx expo run:android` para probar alarmas.'
+      );
     }
-  } catch {
-    /* sin respuesta pendiente */
+    return;
   }
+  if (!localNotificationsInitPromise) {
+    localNotificationsInitPromise = performInitLocalNotifications();
+  }
+  await localNotificationsInitPromise;
+}
 
-  if (Platform.OS === 'android') {
-    /** Canal de inicio: AgendaSystemAlarmChannel (config plugin en prebuild / MainApplication) */
-    for (const oldId of ['agenda-anticipation'] as const) {
-      try {
-        await Notifications.deleteNotificationChannelAsync(oldId);
-      } catch {
-        /* ya no existe */
+async function performInitLocalNotifications(): Promise<void> {
+  try {
+    if (foregroundUnsub) {
+      foregroundUnsub();
+      foregroundUnsub = null;
+    }
+    ensureAgendaAlarmBridgeListener();
+    foregroundUnsub = notifee.onForegroundEvent(({ type, detail }) => {
+      const { notification, pressAction } = detail;
+      if (type === EventType.ACTION_PRESS && pressAction?.id) {
+        void handleAlarmInteraction(pressAction.id, notification);
+        return;
       }
-    }
-    await Notifications.setNotificationChannelAsync(ANDROID_CHANNEL_ANTICIPATION, {
-      name: 'Recordatorios (anticipación)',
-      importance: Notifications.AndroidImportance.HIGH,
-      vibrationPattern: [0, 200, 120, 200],
-      sound: 'alert',
-      audioAttributes: {
-        usage: Notifications.AndroidAudioUsage.ALARM,
-        contentType: Notifications.AndroidAudioContentType.SONIFICATION,
-      },
+      if (type === EventType.PRESS && pressAction?.id) {
+        void handleAlarmInteraction(pressAction.id, notification);
+        return;
+      }
+      if (type === EventType.DISMISSED && notification) {
+        void handleAlarmInteraction(ACTION_OK, notification);
+      }
     });
-    for (const oldId of ['agenda-event-start', 'agenda-event-alarm'] as const) {
+
+    try {
+      const initial = await notifee.getInitialNotification();
+      if (initial?.pressAction?.id && isAlarmAction(normalizeActionId(initial.pressAction.id))) {
+        await handleAlarmInteraction(initial.pressAction.id, initial.notification);
+      }
+    } catch {
+      /* */
+    }
+
+    for (const oldId of ['agenda-anticipation', 'agenda-anticipation-alert', 'agenda-anticipation-v4'] as const) {
       try {
-        await Notifications.deleteNotificationChannelAsync(oldId);
+        await notifee.deleteChannel(oldId);
       } catch {
-        /* opcional */
+        /* */
       }
     }
 
-    // Tras primer arranque, una sola vez en Android 12–13: pedir “Alarmas y recordatorios” para que suenen con la app cerrada.
+    for (const oldId of ['agenda-event-start', 'agenda-event-alarm', 'agenda-event-phone-alarm', 'agenda-event-phone-alarm-v4'] as const) {
+      try {
+        await notifee.deleteChannel(oldId);
+      } catch {
+        /* */
+      }
+    }
+
+    await ensureNativeAlarmChannelsVisible();
+
     setTimeout(() => {
       void maybeOpenAndroidExactAlarmSettingsOnce();
     }, 2500);
+  } catch (e) {
+    console.warn('[Agenda] initLocalNotifications falló', e);
   }
 }
 
 async function ensurePermissions(): Promise<boolean> {
-  if (!isNativeMobile()) return false;
-  const { status: existing } = await Notifications.getPermissionsAsync();
-  if (existing === 'granted') return true;
-  const { status } = await Notifications.requestPermissionsAsync();
-  return status === 'granted';
+  if (!isAndroidNotifications()) return false;
+  let settings = await notifee.getNotificationSettings();
+
+  if (!notificationAuthorized(settings)) {
+    const req = await notifee.requestPermission({
+      alert: true,
+      badge: true,
+      sound: true,
+    });
+    if (!notificationAuthorized(req)) {
+      console.warn(
+        '[Agenda] Permiso de notificaciones no concedido (estado:',
+        req.authorizationStatus,
+        '). Sin él no se programan alarmas.'
+      );
+      return false;
+    }
+    settings = await notifee.getNotificationSettings();
+  }
+
+  if (!notificationAuthorized(settings)) {
+    return false;
+  }
+
+  const api = androidApiLevel();
+  if (api >= 31 && settings.android.alarm === AndroidNotificationSetting.DISABLED && !warnedExactAlarmDisabled) {
+    warnedExactAlarmDisabled = true;
+    console.warn(
+      '[Agenda] Alarmas exactas desactivadas para esta app; en Ajustes permite alarmas y recordatorios para que disparen a la hora (el init también puede abrir esa pantalla una vez).'
+    );
+  }
+  return true;
 }
 
 export async function cancelNotificationsForReminder(reminderId: string): Promise<void> {
-  if (!isNativeMobile()) return;
+  if (!isAndroidNotifications()) return;
   try {
-    const all = await Notifications.getAllScheduledNotificationsAsync();
-    for (const req of all) {
-      const rid = req.content.data?.reminderId;
-      if (rid === reminderId) {
-        await Notifications.cancelScheduledNotificationAsync(req.identifier);
+    const triggers = await notifee.getTriggerNotifications();
+    for (const t of triggers) {
+      const rid = t.notification.data?.reminderId;
+      if (rid === reminderId && t.notification.id) {
+        await notifee.cancelTriggerNotification(t.notification.id);
+      }
+    }
+    const displayed = await notifee.getDisplayedNotifications();
+    for (const d of displayed) {
+      const rid = d.notification.data?.reminderId;
+      if (rid === reminderId && d.id) {
+        await notifee.cancelDisplayedNotification(d.id);
       }
     }
   } catch {
-    /* getAll no disponible en algunos entornos */
+    /* */
   }
 }
 
-type SchedulableTrigger = NonNullable<Notifications.NotificationRequestInput['trigger']>;
+function isPostponeSnoozeIdentifier(identifier: string): boolean {
+  return identifier.startsWith('agenda-p-') || identifier.startsWith('agenda-ap-');
+}
 
-async function scheduleWithTrigger(
+async function cancelMainScheduledNotificationsForReminder(reminderId: string): Promise<void> {
+  if (!isAndroidNotifications()) return;
+  try {
+    const triggers = await notifee.getTriggerNotifications();
+    for (const t of triggers) {
+      const id = t.notification.id;
+      if (!id || isPostponeSnoozeIdentifier(id)) continue;
+      const rid = t.notification.data?.reminderId;
+      if (rid === reminderId) {
+        await notifee.cancelTriggerNotification(id);
+      }
+    }
+  } catch {
+    /* */
+  }
+}
+
+async function scheduleTrigger(
   reminder: Reminder,
   identifier: string,
-  trigger: SchedulableTrigger,
-  content: Notifications.NotificationContentInput,
-  androidChannelId: string
+  trigger: TimestampTrigger,
+  notification: Notification
 ): Promise<void> {
-  const finalTrigger: SchedulableTrigger =
-    Platform.OS === 'android' && trigger && typeof trigger === 'object' && 'type' in trigger
-      ? ({ ...trigger, channelId: androidChannelId } as SchedulableTrigger)
-      : trigger;
-  await Notifications.scheduleNotificationAsync({
-    identifier,
-    content,
-    trigger: finalTrigger,
-  });
+  void identifier;
+  const fireMs = triggerFireTimestampMs(trigger);
+  const base = withAlarmWakeBoost(notification, fireMs);
+  primeNativeLockScreenPayload(reminder, base);
+  const attempts: Array<{ label: string; n: Notification; t: TimestampTrigger }> = [
+    { label: 'alarm_clock+ui_completa', n: base, t: trigger },
+    {
+      label: 'alarm_clock+sin_fullscreen',
+      n: withAlarmWakeBoost(stripFullScreenIntentOnly(base), fireMs),
+      t: trigger,
+    },
+    {
+      label: 'alarm_clock+sin_acciones',
+      n: withAlarmWakeBoost(stripActionsOnly(base), fireMs),
+      t: trigger,
+    },
+    {
+      label: 'alarm_clock+sin_fs_sin_acciones',
+      n: withAlarmWakeBoost(stripFullScreenAndActionsKeepWakeUi(base), fireMs),
+      t: trigger,
+    },
+    {
+      label: 'workmanager+sin_fullscreen',
+      n: withAlarmWakeBoost(stripFullScreenIntentOnly(base), fireMs),
+      t: workManagerTimestampTrigger(trigger),
+    },
+    { label: 'alarm_clock+ui_minima', n: stripHeavyAlarmAndroidUi(base), t: trigger },
+    {
+      label: 'workmanager+ui_minima',
+      n: stripHeavyAlarmAndroidUi(base),
+      t: workManagerTimestampTrigger(trigger),
+    },
+  ];
+
+  let lastErr: unknown;
+  for (const att of attempts) {
+    try {
+      await notifee.createTriggerNotification(att.n, att.t);
+      if (att.label !== 'alarm_clock+ui_completa') {
+        console.warn(`[Agenda] Alarma programada vía "${att.label}" (id ${notification.id ?? '?'})`);
+      }
+      return;
+    } catch (e) {
+      lastErr = e;
+      console.warn(`[Agenda] createTriggerNotification [${att.label}]: ${formatNotifeeScheduleError(e)}`);
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error(formatNotifeeScheduleError(lastErr));
 }
 
 type RepeatKind = NonNullable<Reminder['repeat']>;
@@ -420,199 +1030,139 @@ async function scheduleNativePair(
   repeat: RepeatKind,
   fireAnticipation: Date,
   fireStart: Date
-): Promise<void> {
+): Promise<boolean> {
   const idA = `agenda-a-${reminder.id}`;
   const idS = `agenda-s-${reminder.id}`;
-  const contentA = buildAnticipationContent(reminder);
-  const contentS = buildStartContent(reminder);
+  const now = Date.now();
+
+  const safeSchedule = async (fn: () => Promise<void>): Promise<boolean> => {
+    try {
+      await fn();
+      return true;
+    } catch (e) {
+      console.warn('[Agenda] Error al programar notificación local', e);
+      return false;
+    }
+  };
 
   if (repeat === 'daily') {
-    await scheduleWithTrigger(
-      reminder,
-      idA,
-      {
-        type: Notifications.SchedulableTriggerInputTypes.DAILY,
-        hour: fireAnticipation.getHours(),
-        minute: fireAnticipation.getMinutes(),
-      },
-      contentA,
-      ANDROID_CHANNEL_ANTICIPATION
+    const tsStart = nextDailyTimestamp(fireStart.getHours(), fireStart.getMinutes(), now);
+    const tsAnt = nextDailyTimestamp(fireAnticipation.getHours(), fireAnticipation.getMinutes(), now);
+    const trigStart: TimestampTrigger = {
+      type: TriggerType.TIMESTAMP,
+      timestamp: tsStart,
+      repeatFrequency: RepeatFrequency.DAILY,
+      ...androidAlarmTriggerBase(),
+    };
+    const trigAnt: TimestampTrigger = {
+      type: TriggerType.TIMESTAMP,
+      timestamp: tsAnt,
+      repeatFrequency: RepeatFrequency.DAILY,
+      ...androidAlarmTriggerBase(),
+    };
+    const okStart = await safeSchedule(() =>
+      scheduleTrigger(reminder, idS, trigStart, buildStartNotification(reminder, idS))
     );
-    await scheduleWithTrigger(
-      reminder,
-      idS,
-      {
-        type: Notifications.SchedulableTriggerInputTypes.DAILY,
-        hour: fireStart.getHours(),
-        minute: fireStart.getMinutes(),
-      },
-      contentS,
-      ANDROID_CHANNEL_EVENT_START
+    const okAnt = await safeSchedule(() =>
+      scheduleTrigger(reminder, idA, trigAnt, buildAnticipationNotification(reminder, idA, { includeActions: true }))
     );
-    return;
+    return okStart && okAnt;
   }
+
   if (repeat === 'weekly') {
-    await scheduleWithTrigger(
-      reminder,
-      idA,
-      {
-        type: Notifications.SchedulableTriggerInputTypes.WEEKLY,
-        weekday: expoWeekdayFromDate(fireAnticipation),
-        hour: fireAnticipation.getHours(),
-        minute: fireAnticipation.getMinutes(),
-      },
-      contentA,
-      ANDROID_CHANNEL_ANTICIPATION
+    const wS = expoWeekdayFromDate(fireStart);
+    const wA = expoWeekdayFromDate(fireAnticipation);
+    const tsStart = nextWeeklyTimestamp(wS, fireStart.getHours(), fireStart.getMinutes(), now);
+    const tsAnt = nextWeeklyTimestamp(wA, fireAnticipation.getHours(), fireAnticipation.getMinutes(), now);
+    const trigStart: TimestampTrigger = {
+      type: TriggerType.TIMESTAMP,
+      timestamp: tsStart,
+      repeatFrequency: RepeatFrequency.WEEKLY,
+      ...androidAlarmTriggerBase(),
+    };
+    const trigAnt: TimestampTrigger = {
+      type: TriggerType.TIMESTAMP,
+      timestamp: tsAnt,
+      repeatFrequency: RepeatFrequency.WEEKLY,
+      ...androidAlarmTriggerBase(),
+    };
+    const okStart = await safeSchedule(() =>
+      scheduleTrigger(reminder, idS, trigStart, buildStartNotification(reminder, idS))
     );
-    await scheduleWithTrigger(
-      reminder,
-      idS,
-      {
-        type: Notifications.SchedulableTriggerInputTypes.WEEKLY,
-        weekday: expoWeekdayFromDate(fireStart),
-        hour: fireStart.getHours(),
-        minute: fireStart.getMinutes(),
-      },
-      contentS,
-      ANDROID_CHANNEL_EVENT_START
+    const okAnt = await safeSchedule(() =>
+      scheduleTrigger(reminder, idA, trigAnt, buildAnticipationNotification(reminder, idA, { includeActions: true }))
     );
-    return;
+    return okStart && okAnt;
   }
-  if (repeat === 'monthly') {
-    await scheduleWithTrigger(
-      reminder,
-      idA,
-      {
-        type: Notifications.SchedulableTriggerInputTypes.MONTHLY,
-        day: fireAnticipation.getDate(),
-        hour: fireAnticipation.getHours(),
-        minute: fireAnticipation.getMinutes(),
-      },
-      contentA,
-      ANDROID_CHANNEL_ANTICIPATION
-    );
-    await scheduleWithTrigger(
-      reminder,
-      idS,
-      {
-        type: Notifications.SchedulableTriggerInputTypes.MONTHLY,
-        day: fireStart.getDate(),
-        hour: fireStart.getHours(),
-        minute: fireStart.getMinutes(),
-      },
-      contentS,
-      ANDROID_CHANNEL_EVENT_START
-    );
-    return;
-  }
-  if (repeat === 'yearly') {
-    await scheduleWithTrigger(
-      reminder,
-      idA,
-      {
-        type: Notifications.SchedulableTriggerInputTypes.YEARLY,
-        day: fireAnticipation.getDate(),
-        month: fireAnticipation.getMonth(),
-        hour: fireAnticipation.getHours(),
-        minute: fireAnticipation.getMinutes(),
-      },
-      contentA,
-      ANDROID_CHANNEL_ANTICIPATION
-    );
-    await scheduleWithTrigger(
-      reminder,
-      idS,
-      {
-        type: Notifications.SchedulableTriggerInputTypes.YEARLY,
-        day: fireStart.getDate(),
-        month: fireStart.getMonth(),
-        hour: fireStart.getHours(),
-        minute: fireStart.getMinutes(),
-      },
-      contentS,
-      ANDROID_CHANNEL_EVENT_START
-    );
-  }
+
+  return false;
 }
 
 async function scheduleNativeStartOnly(reminder: Reminder, repeat: RepeatKind, fireStart: Date): Promise<void> {
   const idS = `agenda-s-${reminder.id}`;
-  const contentS = buildStartContent(reminder);
+  const now = Date.now();
 
   if (repeat === 'daily') {
-    await scheduleWithTrigger(
-      reminder,
-      idS,
-      {
-        type: Notifications.SchedulableTriggerInputTypes.DAILY,
-        hour: fireStart.getHours(),
-        minute: fireStart.getMinutes(),
-      },
-      contentS,
-      ANDROID_CHANNEL_EVENT_START
-    );
+    const ts = nextDailyTimestamp(fireStart.getHours(), fireStart.getMinutes(), now);
+    const trig: TimestampTrigger = {
+      type: TriggerType.TIMESTAMP,
+      timestamp: ts,
+      repeatFrequency: RepeatFrequency.DAILY,
+      ...androidAlarmTriggerBase(),
+    };
+    await scheduleTrigger(reminder, idS, trig, buildStartNotification(reminder, idS));
     return;
   }
   if (repeat === 'weekly') {
-    await scheduleWithTrigger(
-      reminder,
-      idS,
-      {
-        type: Notifications.SchedulableTriggerInputTypes.WEEKLY,
-        weekday: expoWeekdayFromDate(fireStart),
-        hour: fireStart.getHours(),
-        minute: fireStart.getMinutes(),
-      },
-      contentS,
-      ANDROID_CHANNEL_EVENT_START
-    );
-    return;
-  }
-  if (repeat === 'monthly') {
-    await scheduleWithTrigger(
-      reminder,
-      idS,
-      {
-        type: Notifications.SchedulableTriggerInputTypes.MONTHLY,
-        day: fireStart.getDate(),
-        hour: fireStart.getHours(),
-        minute: fireStart.getMinutes(),
-      },
-      contentS,
-      ANDROID_CHANNEL_EVENT_START
-    );
-    return;
-  }
-  if (repeat === 'yearly') {
-    await scheduleWithTrigger(
-      reminder,
-      idS,
-      {
-        type: Notifications.SchedulableTriggerInputTypes.YEARLY,
-        day: fireStart.getDate(),
-        month: fireStart.getMonth(),
-        hour: fireStart.getHours(),
-        minute: fireStart.getMinutes(),
-      },
-      contentS,
-      ANDROID_CHANNEL_EVENT_START
-    );
+    const w = expoWeekdayFromDate(fireStart);
+    const ts = nextWeeklyTimestamp(w, fireStart.getHours(), fireStart.getMinutes(), now);
+    const trig: TimestampTrigger = {
+      type: TriggerType.TIMESTAMP,
+      timestamp: ts,
+      repeatFrequency: RepeatFrequency.WEEKLY,
+      ...androidAlarmTriggerBase(),
+    };
+    await scheduleTrigger(reminder, idS, trig, buildStartNotification(reminder, idS));
   }
 }
 
-/**
- * Cancela notificaciones previas del recordatorio; programa siempre la alarma a la hora de inicio
- * y, si "Activar alarma" está encendida, también la anticipación.
- */
-export async function syncReminderNotification(reminder: Reminder): Promise<void> {
-  if (!isNativeMobile()) return;
+export type SyncReminderNotificationOptions = {
+  preservePostponeSnoozes?: boolean;
+};
 
-  await cancelNotificationsForReminder(reminder.id);
+export async function syncReminderNotification(
+  reminder: Reminder,
+  options?: SyncReminderNotificationOptions
+): Promise<void> {
+  if (!isAndroidNotifications()) return;
+
+  if (isExpoGoEnvironment()) {
+    if (!warnedExpoGoNotifications) {
+      warnedExpoGoNotifications = true;
+      console.warn(
+        '[Agenda] Las alarmas no están disponibles en Expo Go. Genera e instala la app con `npx expo run:android`.'
+      );
+    }
+    return;
+  }
+
+  /** Canales + listener; idempotente. Evita guardar un evento antes de que acabe el init del montaje. */
+  await initLocalNotifications();
+  await ensureNativeAlarmChannelsVisible();
+
+  if (options?.preservePostponeSnoozes) {
+    await cancelMainScheduledNotificationsForReminder(reminder.id);
+  } else {
+    await cancelNotificationsForReminder(reminder.id);
+  }
 
   if (reminder.noTime) return;
 
   const granted = await ensurePermissions();
-  if (!granted) return;
+  if (!granted) {
+    console.warn('[Agenda] Sin permiso de notificaciones no se pueden programar alarmas. Acepta el permiso o actívalo en Ajustes.');
+    return;
+  }
 
   const wantsAnticipation = Boolean(reminder.alarm && reminder.alarmOffset != null);
 
@@ -621,20 +1171,25 @@ export async function syncReminderNotification(reminder: Reminder): Promise<void
   const endISO = reminder.repeatEndDate?.trim() || null;
   const now = Date.now();
 
-  const useNativeRepeat = repeat !== 'none' && interval === 1 && endISO === null;
+  const useNativeRepeat =
+    repeat !== 'none' &&
+    interval === 1 &&
+    endISO === null &&
+    (repeat === 'daily' || repeat === 'weekly');
 
   if (useNativeRepeat) {
     const fireStart = eventStartLocal(reminder);
-    try {
-      if (wantsAnticipation) {
-        const fireAnticipation = alarmFireLocal(reminder);
-        await scheduleNativePair(reminder, repeat, fireAnticipation, fireStart);
-      } else {
+    if (wantsAnticipation) {
+      const fireAnticipation = alarmFireLocal(reminder);
+      const nativeOk = await scheduleNativePair(reminder, repeat, fireAnticipation, fireStart);
+      if (nativeOk) return;
+    } else {
+      try {
         await scheduleNativeStartOnly(reminder, repeat, fireStart);
+        return;
+      } catch {
+        /* fechas */
       }
-      return;
-    } catch {
-      /* disparos por fecha */
     }
   }
 
@@ -647,11 +1202,25 @@ export async function syncReminderNotification(reminder: Reminder): Promise<void
     safety++;
     if (endISO && dateISO > endISO) break;
 
-    const [y, m, d] = dateISO.split('-').map(Number);
     const occStart = eventStartLocal({ ...reminder, date: dateISO });
     const anticipAt = wantsAnticipation
       ? new Date(occStart.getTime() - offsetToMs(reminder.alarmOffset!, reminder.alarmUnit ?? 'minutes'))
       : occStart;
+
+    if (countS < MAX_DATE_TRIGGERS && occStart.getTime() > now) {
+      try {
+        const id = `agenda-s-${reminder.id}-${countS}`;
+        const trigger: TimestampTrigger = {
+          type: TriggerType.TIMESTAMP,
+          timestamp: occStart.getTime(),
+          ...androidAlarmTriggerBase(),
+        };
+        await scheduleTrigger(reminder, id, trigger, buildStartNotification(reminder, id));
+        countS++;
+      } catch (e) {
+        console.warn('[Agenda] Error al programar notificación de inicio de evento', e);
+      }
+    }
 
     if (
       wantsAnticipation &&
@@ -660,41 +1229,26 @@ export async function syncReminderNotification(reminder: Reminder): Promise<void
       anticipAt.getTime() !== occStart.getTime()
     ) {
       try {
-        await scheduleWithTrigger(
-          reminder,
-          `agenda-a-${reminder.id}-${countA}`,
-          {
-            type: Notifications.SchedulableTriggerInputTypes.DATE,
-            date: anticipAt,
-          },
-          buildAnticipationContent(reminder),
-          ANDROID_CHANNEL_ANTICIPATION
-        );
+        const id = `agenda-a-${reminder.id}-${countA}`;
+        const trigger: TimestampTrigger = {
+          type: TriggerType.TIMESTAMP,
+          timestamp: anticipAt.getTime(),
+          ...androidAlarmTriggerBase(),
+        };
+        await scheduleTrigger(reminder, id, trigger, buildAnticipationNotification(reminder, id, { includeActions: true }));
         countA++;
-      } catch {
-        break;
-      }
-    }
-
-    if (countS < MAX_DATE_TRIGGERS && occStart.getTime() > now) {
-      try {
-        await scheduleWithTrigger(
-          reminder,
-          `agenda-s-${reminder.id}-${countS}`,
-          {
-            type: Notifications.SchedulableTriggerInputTypes.DATE,
-            date: occStart,
-          },
-          buildStartContent(reminder),
-          ANDROID_CHANNEL_EVENT_START
-        );
-        countS++;
-      } catch {
-        break;
+      } catch (e) {
+        console.warn('[Agenda] Error al programar notificación de anticipación', e);
       }
     }
 
     if (repeat === 'none') break;
     dateISO = advanceDateISO(dateISO, repeat, interval);
   }
+}
+
+export async function resyncAllScheduledNotifications(): Promise<void> {
+  if (!isAndroidNotifications()) return;
+  const all = await getAllReminders();
+  await Promise.all(all.map((r) => syncReminderNotification(r, { preservePostponeSnoozes: true })));
 }

@@ -2,7 +2,7 @@
  * Modal de Opciones: tamaño de letra, modo oscuro e intervalo horario del día.
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -13,12 +13,22 @@ import {
   Pressable,
   Switch,
   TextInput,
+  Platform,
 } from 'react-native';
 import { usePreferences } from '../../contexts/PreferencesContext';
 import type { FontSizeKey } from '../../contexts/PreferencesContext';
 import { getDaySchedule, setDaySchedule, clearDaySchedule } from '../../services/dayScheduleService';
 import { formatDateFull } from '../../utils/date';
 import { scaledFontSize } from '../../utils/typography';
+import {
+  getAndroidAlarmWakeDiagnostics,
+  openAndroidAppNotificationSettings,
+  openAndroidAppDetailsSettings,
+  openAndroidExactAlarmPermissionSettings,
+  openAndroidManageFullScreenIntentSettings,
+  resyncAllScheduledNotifications,
+  type AndroidAlarmWakeDiagnostics,
+} from '../../services/localNotificationService';
 
 export type OptionsModalProps = {
   visible: boolean;
@@ -66,6 +76,27 @@ export function OptionsModal({ visible, onClose, selectedDate, onDayScheduleSave
       setDayEndPm(end12.pm);
     }
   }, [visible, selectedDate, preferences.scheduleStartHour, preferences.scheduleEndHour]);
+
+  const [androidAlarmDiag, setAndroidAlarmDiag] = useState<AndroidAlarmWakeDiagnostics | null>(null);
+  const [androidAlarmDiagLoading, setAndroidAlarmDiagLoading] = useState(false);
+
+  const refreshAndroidAlarmDiagnostics = useCallback(async () => {
+    if (Platform.OS !== 'android') return;
+    setAndroidAlarmDiagLoading(true);
+    try {
+      const d = await getAndroidAlarmWakeDiagnostics();
+      setAndroidAlarmDiag(d);
+    } catch {
+      setAndroidAlarmDiag(null);
+    } finally {
+      setAndroidAlarmDiagLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!visible || Platform.OS !== 'android') return;
+    void refreshAndroidAlarmDiagnostics();
+  }, [visible, refreshAndroidAlarmDiagnostics]);
 
   const handleSaveDaySchedule = () => {
     if (!selectedDate) return;
@@ -125,7 +156,7 @@ export function OptionsModal({ visible, onClose, selectedDate, onDayScheduleSave
       fontFamily: 'PixelOperator',
       fontWeight: 'normal',
     },
-    scroll: { maxHeight: 420 },
+    scroll: { maxHeight: 560 },
     scrollContent: { padding: 18, paddingBottom: 12 },
     sectionTitle: {
       fontSize: baseFs(15),
@@ -235,6 +266,51 @@ export function OptionsModal({ visible, onClose, selectedDate, onDayScheduleSave
     dayScheduleBtnSecondary: { backgroundColor: colors.barBackground },
     dayScheduleBtnText: { fontSize: baseFs(14), color: colors.onAccentBg, fontFamily: 'PixelOperator', fontWeight: 'normal' },
     dayScheduleBtnTextSecondary: { color: colors.text },
+    androidBtn: {
+      paddingVertical: 10,
+      paddingHorizontal: 14,
+      borderRadius: 0,
+      backgroundColor: colors.barBackground,
+      marginBottom: 8,
+    },
+    androidBtnText: { fontSize: baseFs(14), color: colors.text, fontFamily: 'PixelOperator', fontWeight: 'normal' },
+    diagHint: {
+      fontSize: baseFs(12),
+      color: colors.textSecondary,
+      fontFamily: 'PixelOperator',
+      fontWeight: 'normal',
+      marginBottom: 10,
+      lineHeight: baseFs(17),
+    },
+    diagRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'flex-start',
+      gap: 12,
+      marginBottom: 6,
+      paddingVertical: 2,
+    },
+    diagKey: {
+      fontSize: baseFs(13),
+      color: colors.textSecondary,
+      fontFamily: 'PixelOperator',
+      fontWeight: 'normal',
+      flex: 1,
+    },
+    diagVal: {
+      fontSize: baseFs(13),
+      color: colors.text,
+      fontFamily: 'PixelOperator',
+      fontWeight: 'normal',
+      maxWidth: '52%',
+      textAlign: 'right',
+    },
+    diagValAttention: {
+      color: '#ca8a04',
+    },
+    diagValOk: {
+      color: colors.daySelectedBg,
+    },
   });
 
   return (
@@ -275,6 +351,117 @@ export function OptionsModal({ visible, onClose, selectedDate, onDayScheduleSave
                 thumbColor="#fff"
               />
             </View>
+
+            {Platform.OS === 'android' && (
+              <>
+                <Text style={[styles.sectionTitle, { marginTop: 16 }]}>Alarmas en Android</Text>
+                <Text style={styles.diagHint}>
+                  Estado del dispositivo (Notifee / sistema). Si algo sale en aviso, usa los botones de abajo y pulsa
+                  «Actualizar estado». No aplica en Expo Go.
+                </Text>
+                {androidAlarmDiagLoading ? (
+                  <Text style={[styles.diagKey, { marginBottom: 10 }]}>Cargando estado…</Text>
+                ) : androidAlarmDiag == null ? (
+                  <Text style={[styles.diagVal, styles.diagValAttention, { marginBottom: 10 }]}>
+                    No se pudo leer el estado.
+                  </Text>
+                ) : (
+                  <View style={{ marginBottom: 10 }}>
+                    {(() => {
+                      const d = androidAlarmDiag;
+                      const chText = (v: boolean | null) => (v === null ? '—' : v ? 'OK' : 'Falta');
+                      const chStyle = (v: boolean | null) =>
+                        v === null
+                          ? [styles.diagVal]
+                          : v
+                            ? [styles.diagVal, styles.diagValOk]
+                            : [styles.diagVal, styles.diagValAttention];
+                      const trig =
+                        d.scheduledTriggerCount == null ? '—' : String(d.scheduledTriggerCount);
+                      return (
+                        <>
+                          <View style={styles.diagRow}>
+                            <Text style={styles.diagKey}>Notificaciones</Text>
+                            <Text
+                              style={
+                                d.postNotificationsAuthorized
+                                  ? [styles.diagVal, styles.diagValOk]
+                                  : [styles.diagVal, styles.diagValAttention]
+                              }
+                            >
+                              {d.postNotificationsAuthorized ? 'Sí' : 'No'}
+                            </Text>
+                          </View>
+                          <View style={styles.diagRow}>
+                            <Text style={styles.diagKey}>Alarmas exactas</Text>
+                            <Text
+                              style={
+                                d.alarmSchedulingEnabled
+                                  ? [styles.diagVal, styles.diagValOk]
+                                  : [styles.diagVal, styles.diagValAttention]
+                              }
+                            >
+                              {d.alarmSchedulingEnabled ? 'Sí' : 'No'}
+                            </Text>
+                          </View>
+                          <View style={styles.diagRow}>
+                            <Text style={styles.diagKey}>Canal inicio (alarma)</Text>
+                            <Text style={chStyle(d.startChannelReady)}>{chText(d.startChannelReady)}</Text>
+                          </View>
+                          <View style={styles.diagRow}>
+                            <Text style={styles.diagKey}>Canal anticipación</Text>
+                            <Text style={chStyle(d.anticipationChannelReady)}>{chText(d.anticipationChannelReady)}</Text>
+                          </View>
+                          <View style={styles.diagRow}>
+                            <Text style={styles.diagKey}>Triggers programados</Text>
+                            <Text style={[styles.diagVal]}>{trig}</Text>
+                          </View>
+                          <View style={styles.diagRow}>
+                            <Text style={styles.diagKey}>Android API</Text>
+                            <Text style={[styles.diagVal]}>{String(d.androidApiLevel)}</Text>
+                          </View>
+                        </>
+                      );
+                    })()}
+                  </View>
+                )}
+                <TouchableOpacity
+                  style={styles.androidBtn}
+                  onPress={() => void refreshAndroidAlarmDiagnostics()}
+                >
+                  <Text style={styles.androidBtnText}>Actualizar estado de alarmas</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.androidBtn}
+                  onPress={() => void openAndroidAppNotificationSettings()}
+                >
+                  <Text style={styles.androidBtnText}>Ajustes de notificación de la app</Text>
+                </TouchableOpacity>
+                {typeof Platform.Version === 'number' && Platform.Version >= 34 ? (
+                  <TouchableOpacity
+                    style={styles.androidBtn}
+                    onPress={() => void openAndroidManageFullScreenIntentSettings()}
+                  >
+                    <Text style={styles.androidBtnText}>Permitir pantalla completa en alarmas</Text>
+                  </TouchableOpacity>
+                ) : null}
+                <TouchableOpacity style={styles.androidBtn} onPress={() => void openAndroidExactAlarmPermissionSettings()}>
+                  <Text style={styles.androidBtnText}>Permiso de alarmas exactas</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.androidBtn} onPress={() => void openAndroidAppDetailsSettings()}>
+                  <Text style={styles.androidBtnText}>Detalles de la app (batería)</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.androidBtn, { marginBottom: 0 }]}
+                  onPress={async () => {
+                    await resyncAllScheduledNotifications();
+                    await refreshAndroidAlarmDiagnostics();
+                  }}
+                >
+                  <Text style={styles.androidBtnText}>Reprogramar todas las alarmas</Text>
+                </TouchableOpacity>
+              </>
+            )}
 
             {selectedDate && (
               <>

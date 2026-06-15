@@ -36,17 +36,6 @@ export function formatDisplayDate(dateISO: string): string {
   return `${d} ${MONTHS_SHORT[m - 1]} ${yearShort}`;
 }
 
-/** Fila estilo PDA (cabecera corta): "Vie 22/5/26" */
-const DOW_PDA = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
-export function formatDatePdaRow(dateISO: string): string {
-  const d = new Date(dateISO + 'T12:00:00');
-  const dow = DOW_PDA[d.getDay()];
-  const day = d.getDate();
-  const month = d.getMonth() + 1;
-  const yy = String(d.getFullYear()).slice(-2);
-  return `${dow} ${day}/${month}/${yy}`;
-}
-
 function pad2(n: number): string {
   return n < 10 ? '0' + n : String(n);
 }
@@ -162,14 +151,6 @@ export function formatTimeDisplay(time24: string, use24h: boolean): string {
 }
 
 const WEEKDAY_SHORT = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
-
-/** Fecha para detalles del evento: "Vie 13/3/26" */
-export function formatDateDetails(dateISO: string): string {
-  const d = new Date(dateISO + 'T12:00:00');
-  const [y, m, day] = dateISO.split('-').map(Number);
-  const weekday = WEEKDAY_SHORT[d.getDay()];
-  return `${weekday} ${day}/${m}/${String(y).slice(-2)}`;
-}
 
 /** Fecha con día de la semana para resumen: "Dom, 8 Mar" */
 export function formatDateWithWeekday(dateISO: string): string {

@@ -5,32 +5,35 @@
 
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as Notifications from 'expo-notifications';
+import notifee from '@notifee/react-native';
 
 const STORAGE_KEY = 'agenda_startup_permissions_v1';
 
 let sharedFlow: Promise<void> | null = null;
 
 async function performFirstLaunchPermissions(): Promise<void> {
-  if (Platform.OS === 'web') return;
+  if (Platform.OS === 'web' || Platform.OS !== 'android') return;
 
   const done = await AsyncStorage.getItem(STORAGE_KEY);
   if (done === 'true') return;
 
-  await Notifications.requestPermissionsAsync({
-    ios: {
-      allowAlert: true,
-      allowBadge: true,
-      allowSound: true,
-    },
+  await notifee.requestPermission({
+    alert: true,
+    badge: true,
+    sound: true,
   });
 
-  if (Platform.OS === 'android' && Platform.Version >= 31) {
+  if (Platform.Version >= 31) {
     try {
       const IntentLauncher = await import('expo-intent-launcher');
-      await IntentLauncher.startActivityAsync(
-        IntentLauncher.ActivityAction.REQUEST_SCHEDULE_EXACT_ALARM
-      );
+      const Constants = (await import('expo-constants')).default;
+      const pkg = Constants.expoConfig?.android?.package;
+      if (pkg) {
+        await IntentLauncher.startActivityAsync(
+          IntentLauncher.ActivityAction.REQUEST_SCHEDULE_EXACT_ALARM,
+          { data: `package:${pkg}` }
+        );
+      }
     } catch {
       /* actividad no disponible en algunos entornos */
     }
@@ -43,7 +46,7 @@ async function performFirstLaunchPermissions(): Promise<void> {
  * Idempotente; comparte la misma promesa entre llamadas concurrentes.
  */
 export async function runStartupPermissionFlow(): Promise<void> {
-  if (Platform.OS === 'web') return;
+  if (Platform.OS === 'web' || Platform.OS !== 'android') return;
   if (!sharedFlow) {
     sharedFlow = performFirstLaunchPermissions().finally(() => {
       sharedFlow = null;

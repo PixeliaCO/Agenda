@@ -39,8 +39,6 @@ export type Reminder = {
   noTime?: boolean;
   /** Todo el día (00:00–23:59); se muestra en franja superior; alarma de inicio a las 9:00 ese día */
   allDay?: boolean;
-  /** Evento privado (solo metadato local; la UI puede ocultar detalles en vistas futuras) */
-  isPrivate?: boolean;
   /** Timestamp de creación (para orden/sync con backend) */
   createdAt?: string;
   /** Timestamp de última actualización */
