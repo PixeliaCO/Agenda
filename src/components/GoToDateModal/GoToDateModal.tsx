@@ -174,7 +174,7 @@ export function GoToDateScreen({
           paddingVertical: 4,
         },
         dayHeaderText: {
-          fontSize: fs(13),
+          fontSize: fs(10),
           color: colors.text,
           ...titleFont,
           textAlign: "center",
@@ -305,7 +305,14 @@ export function GoToDateScreen({
           <View style={styles.dayHeaderRow}>
             {SINGLE_DAY_LETTERS.map((dayName, i) => (
               <View key={i} style={styles.dayHeaderCell}>
-                <Text style={styles.dayHeaderText}>{dayName}</Text>
+                <Text
+                  style={styles.dayHeaderText}
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.75}
+                >
+                  {dayName}
+                </Text>
               </View>
             ))}
           </View>

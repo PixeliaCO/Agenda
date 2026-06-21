@@ -1,7 +1,7 @@
 /**
  * Cabecera de la pantalla de agenda (estilo Palm Datebook del Treo de referencia).
  * Barra de título gris claro: fecha en recuadro azul a la izquierda y selector
- * ◀ L M M J V S D ▶ con letras negras a la derecha. Línea azul sólida debajo.
+ * ◀ lune mart mier juev vier saba domi ▶ a la derecha. Línea azul sólida debajo.
  */
 
 import React from 'react';
@@ -52,6 +52,8 @@ export function AgendaHeader({
                   selectedDayIndex === index && styles.letterTextSelected,
                 ]}
                 numberOfLines={1}
+                adjustsFontSizeToFit
+                minimumFontScale={0.75}
               >
                 {letter}
               </Text>

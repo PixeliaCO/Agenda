@@ -40,6 +40,7 @@ export function useAgendaNavStyles() {
         height: 26,
         borderWidth: 1,
         borderColor: colors.agendaHeaderBorder,
+        flex: 1,
         minWidth: 0,
       },
       selectorLabel: {
@@ -55,8 +56,9 @@ export function useAgendaNavStyles() {
         textAlign: 'center',
       },
       letterCell: {
-        paddingHorizontal: 6,
-        minWidth: 22,
+        flex: 1,
+        paddingHorizontal: 1,
+        minWidth: 0,
         alignItems: 'center',
         justifyContent: 'center',
         borderRightWidth: 1,
@@ -64,7 +66,7 @@ export function useAgendaNavStyles() {
       },
       letterCellLast: { borderRightWidth: 0 },
       letterCellSelected: { backgroundColor: colors.agendaHeaderSelectedBg },
-      letterText: { fontSize: f(13), color: colors.agendaHeaderText, ...titleFont },
+      letterText: { fontSize: f(9), color: colors.agendaHeaderText, ...titleFont },
       letterTextSelected: { color: colors.agendaHeaderSelectedText },
     });
   }, [colors, fontScale]);
@@ -88,7 +90,7 @@ export function AgendaNavBar({ chipLabel, onChipPress, children, chipStyle }: Ag
         justifyContent: 'center',
         paddingHorizontal: 10,
         backgroundColor: colors.agendaDateChipBg,
-        maxWidth: '46%',
+        maxWidth: '38%',
         flexShrink: 1,
       },
       dateText: {
