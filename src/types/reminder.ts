@@ -33,8 +33,16 @@ export type Reminder = {
   repeatInterval?: number;
   /** Fin de la repetición (AAAA-MM-DD); sin valor = sin fecha límite */
   repeatEndDate?: string;
+  /** Días de la semana para repeat=weekly (0=Lun … 6=Dom); omitido = día del evento */
+  repeatWeekdays?: number[];
   /** Nota o descripción larga */
   note?: string;
+  /** Ubicación del evento (campo del modal Detalles de la cita) */
+  location?: string;
+  /** Categoría (Palm: "Sin archivar" por defecto) */
+  category?: string;
+  /** Marcado como confidencial/privado */
+  confidential?: boolean;
   /** Sin hora concreta: se muestra arriba de la lista; no programa alarmas por hora */
   noTime?: boolean;
   /** Todo el día (00:00–23:59); se muestra en franja superior; alarma de inicio a las 9:00 ese día */

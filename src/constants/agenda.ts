@@ -3,6 +3,9 @@
  * Nombres de días y franjas horarias por defecto.
  */
 
+/** Iniciales lunes→domingo para la barra del header (caben las 7 sin scroll). */
+export const SINGLE_DAY_LETTERS = ['L', 'M', 'M', 'J', 'V', 'S', 'D'] as const;
+
 /** Nombre del día completo (español), lunes a domingo */
 export const DAY_LETTERS = [
   'Lunes',

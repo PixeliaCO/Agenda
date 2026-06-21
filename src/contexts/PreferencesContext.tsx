@@ -5,6 +5,7 @@
 import React, { createContext, useContext, useState, useCallback, useMemo, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { lightTheme, darkTheme, type ThemeColors } from '../constants/theme';
+import { invalidateAlarmBehaviorCache } from '../services/alarmBehaviorService';
 
 export type FontSizeKey = 'small' | 'normal' | 'large';
 
@@ -13,6 +14,12 @@ export type Preferences = {
   darkMode: boolean;
   scheduleStartHour: number;
   scheduleEndHour: number;
+  /** Minutos para «Recordar nuevamente» (posponer alarma). */
+  alarmSnoozeMinutes: number;
+  /** Intervalo entre re-sonidos automáticos si no respondes. */
+  alarmRepeatIntervalMinutes: number;
+  /** Re-sonidos extra tras el primer aviso (0 = solo una vez). */
+  alarmRepeatCount: number;
 };
 
 const DEFAULT_PREFERENCES: Preferences = {
@@ -20,6 +27,9 @@ const DEFAULT_PREFERENCES: Preferences = {
   darkMode: false,
   scheduleStartHour: 6,
   scheduleEndHour: 22,
+  alarmSnoozeMinutes: 5,
+  alarmRepeatIntervalMinutes: 5,
+  alarmRepeatCount: 4,
 };
 
 const STORAGE_KEY = 'agenda_preferences_v2';
@@ -44,7 +54,37 @@ function sanitizePreferences(input: unknown): Preferences {
   const scheduleEndHour = clampHour((p as any).scheduleEndHour ?? DEFAULT_PREFERENCES.scheduleEndHour);
   const orderedStart = Math.min(scheduleStartHour, scheduleEndHour);
   const orderedEnd = Math.max(scheduleStartHour, scheduleEndHour);
-  return { fontSize, darkMode, scheduleStartHour: orderedStart, scheduleEndHour: orderedEnd };
+  const alarmSnoozeMinutes = clampAlarmMinutes(
+    (p as Partial<Preferences>).alarmSnoozeMinutes ?? DEFAULT_PREFERENCES.alarmSnoozeMinutes
+  );
+  const alarmRepeatIntervalMinutes = clampAlarmMinutes(
+    (p as Partial<Preferences>).alarmRepeatIntervalMinutes ??
+      DEFAULT_PREFERENCES.alarmRepeatIntervalMinutes
+  );
+  const alarmRepeatCount = clampAlarmRepeatCount(
+    (p as Partial<Preferences>).alarmRepeatCount ?? DEFAULT_PREFERENCES.alarmRepeatCount
+  );
+  return {
+    fontSize,
+    darkMode,
+    scheduleStartHour: orderedStart,
+    scheduleEndHour: orderedEnd,
+    alarmSnoozeMinutes,
+    alarmRepeatIntervalMinutes,
+    alarmRepeatCount,
+  };
+}
+
+function clampAlarmMinutes(n: number, max = 120): number {
+  const v = Math.round(Number(n));
+  if (Number.isNaN(v)) return DEFAULT_PREFERENCES.alarmSnoozeMinutes;
+  return Math.max(1, Math.min(max, v));
+}
+
+function clampAlarmRepeatCount(n: number): number {
+  const v = Math.round(Number(n));
+  if (Number.isNaN(v)) return DEFAULT_PREFERENCES.alarmRepeatCount;
+  return Math.max(0, Math.min(10, v));
 }
 
 type PreferencesContextValue = {
@@ -52,6 +92,7 @@ type PreferencesContextValue = {
   setFontSize: (key: FontSizeKey) => void;
   setDarkMode: (on: boolean) => void;
   setScheduleHours: (start: number, end: number) => void;
+  setAlarmBehavior: (snoozeMinutes: number, repeatIntervalMinutes: number, repeatCount: number) => void;
   fontScale: number;
   colors: ThemeColors;
 };
@@ -76,6 +117,7 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
 
   useEffect(() => {
     void AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(preferences));
+    invalidateAlarmBehaviorCache();
   }, [preferences]);
 
   const setFontSize = useCallback((fontSize: FontSizeKey) => {
@@ -94,6 +136,18 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
     setPreferences((p) => ({ ...p, scheduleStartHour: orderedStart, scheduleEndHour: orderedEnd }));
   }, []);
 
+  const setAlarmBehavior = useCallback(
+    (alarmSnoozeMinutes: number, alarmRepeatIntervalMinutes: number, alarmRepeatCount: number) => {
+      setPreferences((p) => ({
+        ...p,
+        alarmSnoozeMinutes: clampAlarmMinutes(alarmSnoozeMinutes),
+        alarmRepeatIntervalMinutes: clampAlarmMinutes(alarmRepeatIntervalMinutes),
+        alarmRepeatCount: clampAlarmRepeatCount(alarmRepeatCount),
+      }));
+    },
+    []
+  );
+
   const fontScale =
     preferences.fontSize === 'small' ? 0.88 : preferences.fontSize === 'large' ? 1.18 : 1;
   const colors = useMemo(
@@ -107,10 +161,11 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
       setFontSize,
       setDarkMode,
       setScheduleHours,
+      setAlarmBehavior,
       fontScale,
       colors,
     }),
-    [preferences, setFontSize, setDarkMode, setScheduleHours, fontScale, colors]
+    [preferences, setFontSize, setDarkMode, setScheduleHours, setAlarmBehavior, fontScale, colors]
   );
 
   return <PreferencesContext.Provider value={value}>{children}</PreferencesContext.Provider>;

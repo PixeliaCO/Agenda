@@ -1,2 +1,2 @@
-export { OptionsModal } from './OptionsModal';
-export type { OptionsModalProps } from './OptionsModal';
+export { OptionsScreen, OptionsModal } from './OptionsModal';
+export type { OptionsScreenProps, OptionsModalProps } from './OptionsModal';

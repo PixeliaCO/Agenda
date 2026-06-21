@@ -5,18 +5,20 @@
 
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import notifee from '@notifee/react-native';
+
+import { isExpoGoEnvironment } from '../utils/expoEnvironment';
 
 const STORAGE_KEY = 'agenda_startup_permissions_v1';
 
 let sharedFlow: Promise<void> | null = null;
 
 async function performFirstLaunchPermissions(): Promise<void> {
-  if (Platform.OS === 'web' || Platform.OS !== 'android') return;
+  if (Platform.OS === 'web' || Platform.OS !== 'android' || isExpoGoEnvironment()) return;
 
   const done = await AsyncStorage.getItem(STORAGE_KEY);
   if (done === 'true') return;
 
+  const notifee = require('@notifee/react-native').default;
   await notifee.requestPermission({
     alert: true,
     badge: true,

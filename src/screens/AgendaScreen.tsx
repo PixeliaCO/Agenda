@@ -5,18 +5,25 @@
  */
 
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { DeviceEventEmitter, View, StyleSheet, Alert, Keyboard, Platform, InteractionManager, AppState } from 'react-native';
+import { DeviceEventEmitter, View, Text, TouchableOpacity, StyleSheet, Alert, Keyboard, Platform, InteractionManager, AppState } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { runOnJS } from 'react-native-reanimated';
 import { StatusBar } from 'expo-status-bar';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { AgendaHeader, AgendaSchedule, AgendaFooter, WeekView, MonthView, DaySummaryView, GoToDateModal, OptionsModal, EventDetailsModal } from '../components';
+import { AgendaHeader, AgendaSchedule, AgendaFooter, WeekView, MonthView, DaySummaryView, GoToDateScreen, EventDetailsModal, AlarmRingScreen } from '../components';
+import { AgendaNavBar, useAgendaNavStyles } from '../components/AgendaNavBar';
+import { OptionsScreen } from './OptionsScreen';
+import { ScreenOverlay } from '../components/PalmScreenShell';
 import { usePreferences } from '../contexts/PreferencesContext';
 import type { AgendaViewTab } from '../types/agenda';
 import type { Reminder, CreateReminderInput, UpdateReminderInput } from '../types/reminder';
 import { buildHoursLabelsWithOptional30 } from '../utils/scheduleHours';
 import {
-  formatDateFull,
+  formatDisplayDate,
+  formatWeekMonthYearRange,
+  formatMonthYearChip,
+  getWeekNumber,
+  getSundayOfWeek,
   getDayIndexFromDate,
   getTodayISO,
   getDateForDayIndexInWeek,
@@ -27,6 +34,7 @@ import { slotLabelTo24H } from '../constants/agenda';
 import {
   getRemindersByDate,
   getAllReminders,
+  getReminderById,
   createReminder,
   updateReminder,
   deleteReminder,
@@ -37,8 +45,16 @@ import {
   syncReminderNotification,
   cancelNotificationsForReminder,
   REMINDER_DELETED_FROM_NOTIFICATION,
+  REMINDER_RESCHEDULE_FROM_NOTIFICATION,
+  ALARM_RING_DISPLAY,
+  ALARM_RING_DISMISSED,
+  processAlarmRingUserAction,
+  type AlarmRingDisplayPayload,
+  consumePendingRescheduleReminderId,
   resyncAllScheduledNotifications,
 } from '../services/localNotificationService';
+import type { Notification } from '@notifee/react-native';
+import { clearAcksForReminder } from '../services/alarmAckService';
 import { runStartupPermissionFlow } from '../services/startupPermissionsService';
 import { getDaySchedule } from '../services/dayScheduleService';
 
@@ -53,12 +69,14 @@ function startTimeToScrollMinutes(startTime: string): number {
 export function AgendaScreen() {
   const insets = useSafeAreaInsets();
   const { preferences, colors } = usePreferences();
+  const navStyles = useAgendaNavStyles();
   const [keyboardPad, setKeyboardPad] = useState(0);
   const [selectedDate, setSelectedDate] = useState(getTodayISO());
   const [optionsVisible, setOptionsVisible] = useState(false);
   const [activeTab, setActiveTab] = useState<AgendaViewTab>('day');
   const [reminders, setReminders] = useState<Reminder[]>([]);
   const [detailsDefaultStartTime, setDetailsDefaultStartTime] = useState<string | undefined>(undefined);
+  const [detailsDefaultTitle, setDetailsDefaultTitle] = useState('');
   const [weekAnchor, setWeekAnchor] = useState(() => new Date());
   const [weekReminders, setWeekReminders] = useState<Reminder[]>([]);
   const [monthAnchor, setMonthAnchor] = useState(() => new Date());
@@ -67,8 +85,9 @@ export function AgendaScreen() {
   const [goToDateMonthAnchor, setGoToDateMonthAnchor] = useState<Date | null>(null);
   const [goToDateReminders, setGoToDateReminders] = useState<Reminder[]>([]);
   const [selectedReminder, setSelectedReminder] = useState<Reminder | null>(null);
-  const [detailsInitialTarget, setDetailsInitialTarget] = useState<'alarm' | 'note' | null>(null);
+  const [detailsInitialTarget, setDetailsInitialTarget] = useState<'alarm' | 'note' | 'time' | null>(null);
   const [detailsVisible, setDetailsVisible] = useState(false);
+  const [alarmRingNotification, setAlarmRingNotification] = useState<Notification | null>(null);
   const [scheduleScrollFocus, setScheduleScrollFocus] = useState<{
     token: number;
     startMinutes: number | null;
@@ -116,7 +135,11 @@ export function AgendaScreen() {
   }, []);
 
   const selectedDayIndex = getDayIndexFromDate(selectedDate);
-  const displayDate = formatDateFull(selectedDate);
+  const displayDate = formatDisplayDate(selectedDate);
+  const weekSunday = useMemo(() => getSundayOfWeek(weekAnchor), [weekAnchor]);
+  const weekHeaderLabel = useMemo(() => formatWeekMonthYearRange(weekSunday), [weekSunday]);
+  const weekNumber = useMemo(() => getWeekNumber(weekSunday), [weekSunday]);
+  const monthHeaderLabel = useMemo(() => formatMonthYearChip(monthAnchor), [monthAnchor]);
 
   const loadReminders = useCallback(async () => {
     const list = await getRemindersByDate(selectedDate);
@@ -223,6 +246,70 @@ export function AgendaScreen() {
     return () => sub.remove();
   }, [loadReminders, loadWeekReminders, loadMonthReminders, loadGoToDateMonthReminders]);
 
+  /** "Reprogramar" desde el aviso: abrir el modal de detalles de ese recordatorio (selector de fecha/hora). */
+  const openReminderForReschedule = useCallback(async (reminderId: string) => {
+    const r = await getReminderById(reminderId);
+    if (!r) return;
+    setActiveTab('day');
+    setSelectedDate(r.date);
+    setSelectedReminder(r);
+    setDetailsInitialTarget('time');
+    setDetailsDefaultStartTime(undefined);
+    setDetailsDefaultTitle('');
+    setDetailsVisible(true);
+  }, []);
+
+  useEffect(() => {
+    // Arranque en frío: el aviso pudo emitir "Reprogramar" antes de montar el listener.
+    const pending = consumePendingRescheduleReminderId();
+    if (pending) void openReminderForReschedule(pending);
+    const sub = DeviceEventEmitter.addListener(
+      REMINDER_RESCHEDULE_FROM_NOTIFICATION,
+      (payload: { reminderId: string }) => {
+        void openReminderForReschedule(payload.reminderId);
+      }
+    );
+    return () => sub.remove();
+  }, [openReminderForReschedule]);
+
+  useEffect(() => {
+    const showSub = DeviceEventEmitter.addListener(
+      ALARM_RING_DISPLAY,
+      (payload: AlarmRingDisplayPayload) => {
+        setAlarmRingNotification(payload.notification);
+      },
+    );
+    const hideSub = DeviceEventEmitter.addListener(
+      ALARM_RING_DISMISSED,
+      (payload: { notificationId: string }) => {
+        setAlarmRingNotification((prev) =>
+          prev?.id === payload.notificationId ? null : prev,
+        );
+      },
+    );
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
+
+  const handleAlarmRingAction = useCallback(
+    async (action: 'complete' | 'snooze' | 'reschedule') => {
+      if (!alarmRingNotification) return;
+      await processAlarmRingUserAction(action, alarmRingNotification);
+      setAlarmRingNotification(null);
+      void loadReminders();
+      void loadWeekReminders();
+      void loadMonthReminders();
+    },
+    [
+      alarmRingNotification,
+      loadReminders,
+      loadWeekReminders,
+      loadMonthReminders,
+    ],
+  );
+
   const handlePrevious = useCallback(() => {
     setSelectedDate((prev) => addDays(prev, -1));
   }, []);
@@ -267,6 +354,7 @@ export function AgendaScreen() {
     hourIndex: number;
     fragmentIndex: number;
   }) => {
+    // Tocar una hora vacía → escribir directo (inline). El modal se abre solo con el reloj.
     commitPendingTitleEdit();
     setSelectedReminder(null);
     setInlineSlot(`${payload.hourIndex}-${payload.fragmentIndex}`);
@@ -345,19 +433,20 @@ export function AgendaScreen() {
   const handleReminderHourPress = useCallback(
     (r: Reminder) => {
       if (!commitPendingTitleEdit()) return;
-      setDetailsInitialTarget(null);
+      setDetailsInitialTarget('time');
       setTitleEditReminderId(null);
       setTitleEditDraft('');
       titleEditReminderIdRef.current = null;
       setSelectedReminder(r);
       setDetailsDefaultStartTime(undefined);
+      setDetailsDefaultTitle('');
       setDetailsVisible(true);
     },
     [commitPendingTitleEdit]
   );
 
   const handleEmptyHourPress = useCallback(
-    (hourLabel: string) => {
+    (hourLabel: string, draftTitle?: string) => {
       if (!commitPendingTitleEdit()) return;
       setInlineSlot(null);
       setTitleEditReminderId(null);
@@ -366,6 +455,7 @@ export function AgendaScreen() {
       setSelectedReminder(null);
       setDetailsInitialTarget(null);
       setDetailsDefaultStartTime(slotLabelTo24H(hourLabel));
+      setDetailsDefaultTitle(draftTitle?.trim() ?? '');
       setDetailsVisible(true);
     },
     [commitPendingTitleEdit]
@@ -379,6 +469,7 @@ export function AgendaScreen() {
       titleEditReminderIdRef.current = null;
       setSelectedReminder(r);
       setDetailsDefaultStartTime(undefined);
+      setDetailsDefaultTitle('');
       setDetailsInitialTarget('alarm');
       setDetailsVisible(true);
     },
@@ -393,6 +484,7 @@ export function AgendaScreen() {
       titleEditReminderIdRef.current = null;
       setSelectedReminder(r);
       setDetailsDefaultStartTime(undefined);
+      setDetailsDefaultTitle('');
       setDetailsInitialTarget('note');
       setDetailsVisible(true);
     },
@@ -406,6 +498,7 @@ export function AgendaScreen() {
       setDetailsInitialTarget(null);
       setSelectedReminder(null);
       setDetailsDefaultStartTime(undefined);
+      setDetailsDefaultTitle('');
       setTitleEditReminderId(null);
       setTitleEditDraft('');
       titleEditReminderIdRef.current = null;
@@ -437,9 +530,12 @@ export function AgendaScreen() {
         repeat: input.repeat,
         repeatInterval: input.repeatInterval,
         repeatEndDate: input.repeatEndDate,
+        repeatWeekdays: input.repeatWeekdays,
         note: input.note,
         allDay: input.allDay,
         noTime: input.noTime,
+        location: input.location,
+        category: input.category,
       };
       const created = await createReminder(payload);
       createdForInlineTitle = created;
@@ -451,6 +547,7 @@ export function AgendaScreen() {
         startMinutes: scrollMin,
       }));
     } else {
+      await clearAcksForReminder(id);
       const updated = await updateReminder(id, input);
       if (updated) await syncReminderNotification(updated);
     }
@@ -484,6 +581,7 @@ export function AgendaScreen() {
     setSelectedReminder(null);
     setDetailsInitialTarget(null);
     setDetailsDefaultStartTime(slotLabelTo24H(hourLabel));
+    setDetailsDefaultTitle('');
     setDetailsVisible(true);
   };
 
@@ -493,6 +591,7 @@ export function AgendaScreen() {
     setSelectedReminder(reminder);
     setDetailsInitialTarget(null);
     setDetailsDefaultStartTime(undefined);
+    setDetailsDefaultTitle('');
     setDetailsVisible(true);
   };
 
@@ -519,6 +618,7 @@ export function AgendaScreen() {
     setSelectedReminder(reminder);
     setDetailsInitialTarget(null);
     setDetailsDefaultStartTime(undefined);
+    setDetailsDefaultTitle('');
     setDetailsVisible(true);
   };
 
@@ -570,20 +670,32 @@ export function AgendaScreen() {
     timedReminders
   );
 
+  if (optionsVisible) {
+    return (
+      <OptionsScreen
+        onClose={() => setOptionsVisible(false)}
+        selectedDate={selectedDate}
+        onDayScheduleSaved={() => setScheduleRefreshKey((k) => k + 1)}
+      />
+    );
+  }
+
   return (
     <View style={[styles.container, { paddingTop: insets.top, backgroundColor: colors.screenBackground }]}>
       <StatusBar style={preferences.darkMode ? 'light' : 'dark'} />
+      {(activeTab === 'day' || activeTab === 'events') && (
+        <AgendaHeader
+          displayDate={displayDate}
+          selectedDayIndex={selectedDayIndex}
+          onSelectDay={handleSelectDay}
+          onPrevious={handlePrevious}
+          onNext={handleNext}
+          onDatePress={() => setOptionsVisible(true)}
+        />
+      )}
       {activeTab === 'day' && (
         <GestureDetector gesture={daySwipeGesture}>
           <View style={styles.daySwipeArea}>
-      <AgendaHeader
-        displayDate={displayDate}
-        selectedDayIndex={selectedDayIndex}
-              onSelectDay={handleSelectDay}
-        onPrevious={handlePrevious}
-        onNext={handleNext}
-              onDatePress={() => setOptionsVisible(true)}
-            />
             <AgendaSchedule
               hours={scheduleHours}
               hourMinutes={scheduleHourMinutes}
@@ -615,32 +727,60 @@ export function AgendaScreen() {
         </GestureDetector>
       )}
       {activeTab === 'week' && (
-        <WeekView
-          weekAnchor={weekAnchor}
-          reminders={weekReminders}
-          onPreviousWeek={handlePreviousWeek}
-          onNextWeek={handleNextWeek}
-          onCellPress={handleWeekCellPress}
-          onReminderPress={handleWeekReminderPress}
-        />
+        <AgendaNavBar chipLabel={weekHeaderLabel}>
+          <View style={navStyles.rightWrap}>
+            <TouchableOpacity style={navStyles.arrowCell} onPress={handlePreviousWeek} hitSlop={12}>
+              <Text style={navStyles.arrowText}>{'◀'}</Text>
+            </TouchableOpacity>
+            <View style={navStyles.selector}>
+              <View style={navStyles.selectorLabel}>
+                <Text style={navStyles.selectorLabelText} numberOfLines={1}>
+                  Semana {weekNumber}
+                </Text>
+              </View>
+            </View>
+            <TouchableOpacity style={navStyles.arrowCell} onPress={handleNextWeek} hitSlop={12}>
+              <Text style={navStyles.arrowText}>{'▶'}</Text>
+            </TouchableOpacity>
+          </View>
+        </AgendaNavBar>
+      )}
+      {activeTab === 'week' && (
+        <View style={styles.daySwipeArea}>
+          <WeekView
+            weekAnchor={weekAnchor}
+            reminders={weekReminders}
+            onCellPress={handleWeekCellPress}
+            onReminderPress={handleWeekReminderPress}
+          />
+        </View>
       )}
       {activeTab === 'month' && (
-        <MonthView
-          monthAnchor={monthAnchor}
-          reminders={monthReminders}
-          onPreviousMonth={handlePreviousMonth}
-          onNextMonth={handleNextMonth}
-          onDayPress={handleMonthDayPress}
-        />
+        <AgendaNavBar chipLabel={monthHeaderLabel}>
+          <View style={navStyles.rightWrap}>
+            <TouchableOpacity style={navStyles.arrowCell} onPress={handlePreviousMonth} hitSlop={12}>
+              <Text style={navStyles.arrowText}>{'◀'}</Text>
+            </TouchableOpacity>
+            <View style={{ width: 8 }} />
+            <TouchableOpacity style={navStyles.arrowCell} onPress={handleNextMonth} hitSlop={12}>
+              <Text style={navStyles.arrowText}>{'▶'}</Text>
+            </TouchableOpacity>
+          </View>
+        </AgendaNavBar>
+      )}
+      {activeTab === 'month' && (
+        <View style={styles.daySwipeArea}>
+          <MonthView
+            monthAnchor={monthAnchor}
+            reminders={monthReminders}
+            onDayPress={handleMonthDayPress}
+          />
+        </View>
       )}
       {activeTab === 'events' && (
-        <DaySummaryView
-          dateISO={selectedDate}
-          reminders={reminders}
-          onPreviousDay={handlePrevious}
-          onNextDay={handleNext}
-          onReminderPress={handleEventsReminderPress}
-        />
+        <View style={styles.daySwipeArea}>
+          <DaySummaryView reminders={reminders} onReminderPress={handleEventsReminderPress} />
+        </View>
       )}
       <View style={{ marginBottom: keyboardPad }}>
       <AgendaFooter
@@ -652,6 +792,7 @@ export function AgendaScreen() {
             setSelectedReminder(null);
             setDetailsInitialTarget(null);
             setDetailsDefaultStartTime(undefined);
+            setDetailsDefaultTitle('');
             setDetailsVisible(true);
           }}
           onDetalles={activeTab === 'day' ? handleDetalles : undefined}
@@ -661,39 +802,52 @@ export function AgendaScreen() {
         {/* safe-area debajo del footer cuando NO hay teclado */}
         {keyboardPad === 0 ? <View style={{ height: insets.bottom }} /> : null}
       </View>
-      <EventDetailsModal
-        visible={detailsVisible}
-        reminder={selectedReminder}
-        defaultDate={selectedDate}
-        defaultStartTime={detailsDefaultStartTime}
-        getDayVisibleRange={getDayVisibleRange}
-        initialTarget={detailsInitialTarget}
-        onSave={(id, input) => handleDetailsCommit(id, input)}
-        onDelete={handleDetailsDelete}
-        onClose={() => {
-          setDetailsVisible(false);
-          setDetailsInitialTarget(null);
-          setSelectedReminder(null);
-          setDetailsDefaultStartTime(undefined);
-          setTitleEditReminderId(null);
-          setTitleEditDraft('');
-          titleEditReminderIdRef.current = null;
-        }}
-      />
-      <GoToDateModal
-        visible={goToDateVisible}
-        initialDate={selectedDate}
-        reminders={goToDateReminders}
-        onMonthChange={handleGoToDateMonthChange}
-        onSelectDate={handleGoToDateSelect}
-        onClose={() => setGoToDateVisible(false)}
-      />
-      <OptionsModal
-        visible={optionsVisible}
-        onClose={() => setOptionsVisible(false)}
-        selectedDate={selectedDate}
-        onDayScheduleSaved={() => setScheduleRefreshKey((k) => k + 1)}
-      />
+      {detailsVisible ? (
+        <ScreenOverlay zIndex={60}>
+          <EventDetailsModal
+            visible
+            reminder={selectedReminder}
+            defaultDate={selectedDate}
+            defaultStartTime={detailsDefaultStartTime}
+            defaultTitle={detailsDefaultTitle}
+            getDayVisibleRange={getDayVisibleRange}
+            initialTarget={detailsInitialTarget}
+            onSave={(id, input) => handleDetailsCommit(id, input)}
+            onDelete={handleDetailsDelete}
+            onClose={() => {
+              setDetailsVisible(false);
+              setDetailsInitialTarget(null);
+              setSelectedReminder(null);
+              setDetailsDefaultStartTime(undefined);
+              setDetailsDefaultTitle('');
+              setTitleEditReminderId(null);
+              setTitleEditDraft('');
+              titleEditReminderIdRef.current = null;
+            }}
+          />
+        </ScreenOverlay>
+      ) : null}
+      {goToDateVisible ? (
+        <ScreenOverlay zIndex={55}>
+          <GoToDateScreen
+            initialDate={selectedDate}
+            reminders={goToDateReminders}
+            onMonthChange={handleGoToDateMonthChange}
+            onSelectDate={handleGoToDateSelect}
+            onClose={() => setGoToDateVisible(false)}
+          />
+        </ScreenOverlay>
+      ) : null}
+      {alarmRingNotification ? (
+        <ScreenOverlay zIndex={100}>
+          <AlarmRingScreen
+            notification={alarmRingNotification}
+            onComplete={() => void handleAlarmRingAction('complete')}
+            onSnooze={() => void handleAlarmRingAction('snooze')}
+            onReschedule={() => void handleAlarmRingAction('reschedule')}
+          />
+        </ScreenOverlay>
+      ) : null}
     </View>
   );
 }

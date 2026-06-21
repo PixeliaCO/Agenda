@@ -3,3 +3,4 @@
  */
 
 export { AgendaScreen } from './AgendaScreen';
+export { OptionsScreen, OptionsModal, type OptionsScreenProps, type OptionsModalProps } from './OptionsScreen';

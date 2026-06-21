@@ -5,7 +5,7 @@
  */
 
 import React, { useEffect } from 'react';
-import { Text, TextInput } from 'react-native';
+import { StyleSheet, Text, TextInput } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { useFonts } from 'expo-font';
@@ -18,6 +18,7 @@ let originalTextRender: any = null;
 export default function App() {
   const [fontsLoaded] = useFonts({
     PixelOperator: require('./assets/font/PixelOperator.ttf'),
+    'PixelOperator-Bold': require('./assets/font/PixelOperator-Bold.ttf'),
   });
 
   useEffect(() => {
@@ -29,11 +30,24 @@ export default function App() {
     originalTextRender = originalTextRender ?? (Text as any).render;
     (Text as any).render = function render(...args: any[]) {
       const origin = originalTextRender.apply(this, args);
+      const flatStyle = StyleSheet.flatten(origin.props?.style) ?? {};
+      const weight = flatStyle.fontWeight;
+      const wantsBold =
+        flatStyle.fontFamily === 'PixelOperator-Bold' ||
+        weight === 'bold' ||
+        weight === '700' ||
+        weight === '600';
       return React.cloneElement(origin, {
         ...origin.props,
         allowFontScaling: false,
         maxFontSizeMultiplier: 1,
-        style: [origin.props?.style, { fontFamily: 'PixelOperator', fontWeight: 'normal' }],
+        style: [
+          origin.props?.style,
+          {
+            fontFamily: wantsBold ? 'PixelOperator-Bold' : 'PixelOperator',
+            fontWeight: 'normal',
+          },
+        ],
       });
     };
 

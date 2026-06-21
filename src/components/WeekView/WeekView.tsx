@@ -13,23 +13,20 @@ import {
   Pressable,
   ScrollView,
   Animated,
-  Modal,
   Dimensions,
 } from 'react-native';
+import { PalmScreenShell, ScreenOverlay } from '../PalmScreenShell';
 import { usePreferences } from '../../contexts/PreferencesContext';
 import {
-  formatWeekMonthYearRange,
-  getWeekNumber,
-  getWeekDates,
-  getSundayOfWeek,
-  getDayOfMonth,
   formatDisplayDate,
+  getWeekDates,
+  getDayOfMonth,
   formatTime12h,
   formatTime12hShort,
 } from '../../utils/date';
 import type { Reminder } from '../../types/reminder';
 import { reminderEndMinutesForLayout } from '../../utils/scheduleHours';
-import { scaledFontSize } from '../../utils/typography';
+import { scaledFontSize, titleFont } from '../../utils/typography';
 import { EventTitleWithIcons } from '../EventTitleWithIcons';
 import { WEEK_DAY_LETTERS } from '../../constants/agenda';
 
@@ -49,6 +46,8 @@ const MIN_BLOCK_HEIGHT = 20;
 const CELL_STACK_PADDING_V = 2;
 const CELL_STACK_GAP = 2;
 const CELL_EVENT_HIT_SLOP = 10;
+/** Puntos dibujados entre filas horarias (evita borderStyle dotted en Android). */
+const WEEK_ROW_DOT_COUNT = 48;
 
 type WeekGridRow = { slot24: string; display12h: string };
 type WeekVisualRow = { slot24: string; display12h: string; hour: number; slotIndex: number };
@@ -271,10 +270,6 @@ export type WeekViewProps = {
   weekAnchor: Date;
   /** Recordatorios de la semana (los 7 días) para mostrar indicador en celdas */
   reminders?: Reminder[];
-  /** Navegación: semana anterior */
-  onPreviousWeek: () => void;
-  /** Navegación: semana siguiente */
-  onNextWeek: () => void;
   /** Se llama al pulsar una celda: pasa la fecha (YYYY-MM-DD) y la hora de la fila (ej. "10:00") */
   onCellPress?: (dateISO: string, hourLabel: string) => void;
   /** Se llama al pulsar un bloque de evento: pasa el recordatorio (para abrir edición o detalles) */
@@ -284,8 +279,6 @@ export type WeekViewProps = {
 export function WeekView({
   weekAnchor,
   reminders = [],
-  onPreviousWeek,
-  onNextWeek,
   onCellPress,
   onReminderPress,
 }: WeekViewProps) {
@@ -294,9 +287,6 @@ export function WeekView({
   const [viewportW, setViewportW] = useState(() => Dimensions.get('window').width);
   const hScrollX = useRef(new Animated.Value(0)).current;
   const [tooltipReminder, setTooltipReminder] = useState<Reminder | null>(null);
-  const sunday = getSundayOfWeek(weekAnchor);
-  const weekNum = getWeekNumber(sunday);
-  const monthYear = formatWeekMonthYearRange(sunday);
   const weekDates = useMemo(() => getWeekDates(weekAnchor), [weekAnchor]);
 
   const timedForWeek = useMemo(() => reminders.filter((r) => !r.noTime), [reminders]);
@@ -340,61 +330,41 @@ export function WeekView({
     () =>
       StyleSheet.create({
         container: { flex: 1, backgroundColor: colors.screenBackground },
-        header: {
+        dayDateRow: {
           flexDirection: 'row',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          paddingHorizontal: 12,
-          paddingVertical: 10,
-          backgroundColor: colors.barBackground,
+          paddingVertical: 6,
+          paddingLeft: 0,
+          paddingRight: 0,
           borderBottomWidth: 1,
-          borderBottomColor: colors.barBorder,
+          borderBottomColor: colors.line,
         },
-        monthYear: {
-          fontSize: fs(14),
-          fontFamily: 'PixelOperator',
-          fontWeight: 'normal',
-          color: colors.daySelectedBg,
-          textAlign: 'center',
-        },
-        weekNav: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
-        weekArrow: { padding: 4 },
-        weekArrowText: {
-          fontSize: fs(17),
-          fontFamily: 'PixelOperator',
-          fontWeight: 'normal',
-          color: colors.text,
-          textAlign: 'center',
-        },
-        weekLabel: {
-          fontSize: fs(17),
-          fontFamily: 'PixelOperator',
-          fontWeight: 'normal',
-          color: colors.text,
-          textAlign: 'center',
-        },
-        dayDateRow: { flexDirection: 'row', paddingVertical: 8, paddingLeft: 0, paddingRight: 0 },
         dayDateSpacer: { width: TIME_COLUMN_WIDTH, zIndex: 20, elevation: 20 },
         dayDateCells: { flexDirection: 'row' },
         dayDateCell: { alignItems: 'center', justifyContent: 'center', minWidth: 0, paddingHorizontal: 2 },
         dayLetter: {
-          fontSize: fs(11),
-          lineHeight: Math.round(fs(11) * 1.15),
-          fontFamily: 'PixelOperator',
-          fontWeight: 'normal',
-          color: colors.textSecondary,
+          fontSize: fs(10),
+          lineHeight: Math.round(fs(10) * 1.15),
+          ...titleFont,
+          color: colors.agendaHeaderText,
           textAlign: 'center',
           width: '100%',
         },
         dateNum: {
-          fontSize: fs(26),
+          fontSize: fs(16),
           fontFamily: 'PixelOperator',
           fontWeight: 'normal',
           color: colors.text,
           marginTop: 2,
           textAlign: 'center',
         },
-        gridWrapper: { flex: 1, minHeight: 0 },
+        gridWrapper: {
+          flex: 1,
+          minHeight: 0,
+          borderWidth: 1,
+          borderColor: colors.line,
+          borderRadius: 0,
+          overflow: 'hidden' as const,
+        },
         gridScroll: { flex: 1 },
         gridScrollContent: { paddingBottom: 16 },
         gridContainer: { position: 'relative' as const },
@@ -430,9 +400,24 @@ export function WeekView({
           position: 'relative' as const,
           flexDirection: 'row',
           alignItems: 'stretch',
-          borderBottomWidth: 1,
-          borderStyle: 'dotted',
-          borderColor: colors.line,
+        },
+        hourRowSeparator: {
+          position: 'absolute' as const,
+          right: 0,
+          bottom: 0,
+          height: 3,
+          flexDirection: 'row' as const,
+          alignItems: 'center' as const,
+          overflow: 'hidden' as const,
+          zIndex: 4,
+          elevation: 4,
+          pointerEvents: 'none' as const,
+        },
+        hourRowSeparatorDot: {
+          width: 2,
+          height: 2,
+          marginRight: 3,
+          backgroundColor: colors.textSecondary,
         },
         timeCell: {
           width: TIME_COLUMN_WIDTH,
@@ -447,10 +432,10 @@ export function WeekView({
           // sin fondo (transparente) para no tapar la grilla/días
         },
         timeLabel: {
-          fontSize: fs(24),
+          fontSize: fs(13),
           fontFamily: 'PixelOperator',
           fontWeight: 'normal',
-          color: colors.text,
+          color: colors.textSecondary,
           textAlign: 'center',
         },
         gridCells: { flexDirection: 'row', marginLeft: TIME_COLUMN_WIDTH },
@@ -493,7 +478,7 @@ export function WeekView({
           shadowRadius: 8,
           elevation: 6,
         },
-        tooltipTitle: { fontSize: fs(26), fontFamily: 'PixelOperator', fontWeight: 'normal', color: colors.text },
+        tooltipTitle: { fontSize: fs(26), ...titleFont, color: colors.text },
         tooltipMeta: {
           fontSize: fs(23),
           fontFamily: 'PixelOperator',
@@ -550,6 +535,11 @@ export function WeekView({
                 style={[styles.cell, i === 0 && styles.cellFirst, { width: dayColW }]}
                 onPress={() => onCellPress?.(dateISO, row.slot24)}
               />
+            ))}
+          </View>
+          <View style={[styles.hourRowSeparator, { left: TIME_COLUMN_WIDTH }]}>
+            {Array.from({ length: WEEK_ROW_DOT_COUNT }).map((_, dotIndex) => (
+              <View key={dotIndex} style={styles.hourRowSeparatorDot} />
             ))}
           </View>
         </View>
@@ -628,18 +618,6 @@ export function WeekView({
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.monthYear}>{monthYear}</Text>
-        <View style={styles.weekNav}>
-          <TouchableOpacity onPress={onPreviousWeek} style={styles.weekArrow} hitSlop={12}>
-            <Text style={styles.weekArrowText}>{'<'}</Text>
-          </TouchableOpacity>
-          <Text style={styles.weekLabel}>Semana {weekNum}</Text>
-          <TouchableOpacity onPress={onNextWeek} style={styles.weekArrow} hitSlop={12}>
-            <Text style={styles.weekArrowText}>{'>'}</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
       <View style={{ flex: 1, minHeight: 0 }} onLayout={onWeekBodyLayout}>
         <Animated.ScrollView
           horizontal
@@ -680,7 +658,7 @@ export function WeekView({
                 ))}
               </View>
             </View>
-            <View style={[styles.gridWrapper, { flex: 1, minHeight: 0 }]}>
+            <View style={styles.gridWrapper}>
               <ScrollView
                 style={styles.gridScroll}
                 contentContainerStyle={styles.gridScrollContent}
@@ -694,64 +672,47 @@ export function WeekView({
         </Animated.ScrollView>
       </View>
 
-      <Modal visible={!!tooltipReminder} transparent animationType="fade" onRequestClose={() => setTooltipReminder(null)}>
-        <View style={styles.tooltipModalRoot}>
-          <Pressable
-            style={styles.tooltipBackdropFill}
-            onPress={() => setTooltipReminder(null)}
-            accessibilityLabel="Cerrar"
-            accessibilityRole="button"
-          />
-          <View style={styles.tooltipCenterWrap} pointerEvents="box-none">
-            {tooltipReminder ? (
-              <View style={styles.tooltipCard}>
-                <View style={{ marginBottom: 6 }}>
-                  <Text style={styles.tooltipTitle} numberOfLines={2}>
-                    {tooltipReminder.title?.trim() ? tooltipReminder.title : 'Evento'}
-                  </Text>
-                </View>
-                <Text style={styles.tooltipMeta}>
-                  {formatDisplayDate(tooltipReminder.date)}
-                  {tooltipReminder.noTime
-                    ? ' · Sin hora'
-                    : ` · ${tooltipReminder.allDay ? 'Todo el día · ' : ''}${formatTime12h(tooltipReminder.startTime)}${
-                        tooltipReminder.endTime && tooltipReminder.startTime !== tooltipReminder.endTime
-                          ? ` - ${formatTime12h(tooltipReminder.endTime)}`
-                          : ''
-                      }`}
-                </Text>
-                {tooltipDetailText ? (
-                  <ScrollView
-                    style={styles.tooltipDescScroll}
-                    nestedScrollEnabled
-                    keyboardShouldPersistTaps="handled"
-                    showsVerticalScrollIndicator={tooltipDetailText.length > 80}
+      {tooltipReminder ? (
+        <ScreenOverlay zIndex={40}>
+          <PalmScreenShell
+            title={tooltipReminder.title?.trim() ? tooltipReminder.title : 'Evento'}
+            onClose={() => setTooltipReminder(null)}
+            footer={
+              <View style={[styles.tooltipActions, { paddingHorizontal: 14, paddingVertical: 12 }]}>
+                <TouchableOpacity style={styles.tooltipBtn} onPress={() => setTooltipReminder(null)}>
+                  <Text style={styles.tooltipBtnText}>Cerrar</Text>
+                </TouchableOpacity>
+                {onReminderPress ? (
+                  <TouchableOpacity
+                    style={[styles.tooltipBtn, styles.tooltipBtnPrimary]}
+                    onPress={() => {
+                      const r = tooltipReminder;
+                      setTooltipReminder(null);
+                      onReminderPress(r);
+                    }}
                   >
-                    <Text style={styles.tooltipDesc}>{tooltipDetailText}</Text>
-                  </ScrollView>
-                ) : null}
-                <View style={styles.tooltipActions}>
-                  <TouchableOpacity style={styles.tooltipBtn} onPress={() => setTooltipReminder(null)}>
-                    <Text style={styles.tooltipBtnText}>Cerrar</Text>
+                    <Text style={[styles.tooltipBtnText, styles.tooltipBtnTextPrimary]}>Editar</Text>
                   </TouchableOpacity>
-                  {onReminderPress ? (
-                    <TouchableOpacity
-                      style={[styles.tooltipBtn, styles.tooltipBtnPrimary]}
-                      onPress={() => {
-                        const r = tooltipReminder;
-                        setTooltipReminder(null);
-                        onReminderPress(r);
-                      }}
-                    >
-                      <Text style={[styles.tooltipBtnText, styles.tooltipBtnTextPrimary]}>Editar</Text>
-                    </TouchableOpacity>
-                  ) : null}
-                </View>
+                ) : null}
               </View>
-            ) : null}
-          </View>
-        </View>
-      </Modal>
+            }
+          >
+            <ScrollView contentContainerStyle={{ padding: 14 }} keyboardShouldPersistTaps="handled">
+              <Text style={styles.tooltipMeta}>
+                {formatDisplayDate(tooltipReminder.date)}
+                {tooltipReminder.noTime
+                  ? ' · Sin hora'
+                  : ` · ${tooltipReminder.allDay ? 'Todo el día · ' : ''}${formatTime12h(tooltipReminder.startTime)}${
+                      tooltipReminder.endTime && tooltipReminder.startTime !== tooltipReminder.endTime
+                        ? ` - ${formatTime12h(tooltipReminder.endTime)}`
+                        : ''
+                    }`}
+              </Text>
+              {tooltipDetailText ? <Text style={styles.tooltipDesc}>{tooltipDetailText}</Text> : null}
+            </ScrollView>
+          </PalmScreenShell>
+        </ScreenOverlay>
+      ) : null}
     </View>
   );
 }

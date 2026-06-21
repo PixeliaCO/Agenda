@@ -141,6 +141,33 @@ export async function getReminderById(id: string): Promise<Reminder | null> {
   return store.get(id) ?? null;
 }
 
+/** Renombra la categoría en todos los recordatorios que la usen. */
+export async function renameCategoryInReminders(oldName: string, newName: string): Promise<void> {
+  await hydrateOnce();
+  let changed = false;
+  for (const r of store.values()) {
+    if (r.category === oldName) {
+      store.set(r.id, { ...r, category: newName, updatedAt: nowISO() });
+      changed = true;
+    }
+  }
+  if (changed) await persist();
+}
+
+/** Quita la categoría de los recordatorios que la tengan asignada. */
+export async function clearCategoryInReminders(name: string): Promise<void> {
+  await hydrateOnce();
+  let changed = false;
+  for (const r of store.values()) {
+    if (r.category === name) {
+      const { category: _c, ...rest } = r;
+      store.set(r.id, { ...rest, updatedAt: nowISO() });
+      changed = true;
+    }
+  }
+  if (changed) await persist();
+}
+
 export function addHour(time: string): string {
   const [h, m] = time.split(':').map(Number);
   const next = h + 1;

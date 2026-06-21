@@ -1,2 +1,6 @@
-export { GoToDateModal } from './GoToDateModal';
-export type { GoToDateModalProps } from './GoToDateModal';
+export {
+  GoToDateScreen,
+  GoToDateModal,
+  type GoToDateScreenProps,
+  type GoToDateModalProps,
+} from './GoToDateModal.tsx';

@@ -22,16 +22,20 @@ import { DEFAULT_HOURS, slotLabelTo24H } from '../../constants/agenda';
 import { usePreferences } from '../../contexts/PreferencesContext';
 import type { Reminder } from '../../types/reminder';
 import { minutesToScheduleLabel, reminderEndMinutesForLayout } from '../../utils/scheduleHours';
-import { scaledFontSize } from '../../utils/typography';
+import { scaledFontSize, titleFont } from '../../utils/typography';
 import { EventTitleWithIcons } from '../EventTitleWithIcons';
 
 const notaPng = require('../../../assets/nota.png');
+const alarmaPng = require('../../../assets/alarma.png');
 
 /** Espacio extra bajo el contenido cuando hay teclado (evita que el campo quede pegado al teclado). */
 const KEYBOARD_SCROLL_EXTRA = 36;
 
+// Altura única para vacío/foco/edición: que la fila ya quepa el texto y no crezca al escribir.
 const MIN_ROW_HEIGHT = 28;
-const HOUR_ROW_HEIGHT = 35;
+const HOUR_ROW_HEIGHT = 28;
+/** Línea de separación entre horas: puntos dibujados (el borde `dotted` y el carácter · fallan en Android). */
+const ROW_DOT_COUNT = 64;
 /**
  * Ancho del cajón de horas (texto centrado; sin estirar a todo el ancho).
  * Ajustado a etiquetas tipo "12:30" + padding interno simétrico.
@@ -74,7 +78,7 @@ export type AgendaScheduleProps = {
   /** Pulsar la hora de inicio en la columna de horas: detalles completos (modal). */
   onReminderHourPress?: (reminder: Reminder) => void;
   /** Pulsar la hora en una franja vacía: mismo modal que «Nuevo», con esa hora. */
-  onEmptyHourPress?: (hourLabel: string) => void;
+  onEmptyHourPress?: (hourLabel: string, draftTitle?: string) => void;
   onReminderAlarmIconPress?: (reminder: Reminder) => void;
   onReminderNoteIconPress?: (reminder: Reminder) => void;
   /** ID del recordatorio seleccionado (resaltado en la lista) */
@@ -289,6 +293,16 @@ export function AgendaSchedule({
     [titleEditReminderId, onCommitTitleEdit, inlineTitle, onInlineSave, onInlineCancel]
   );
 
+  /** Reloj en franja vacía: marcar antes del blur para que no cancele el inline sin título. */
+  const openInlineHourPicker = useCallback(
+    (hourLabel: string) => {
+      inlineCommittedRef.current = true;
+      if (titleEditReminderId) onCommitTitleEdit?.();
+      onEmptyHourPress?.(hourLabel, inlineTitle.trim() || undefined);
+    },
+    [titleEditReminderId, onCommitTitleEdit, onEmptyHourPress, inlineTitle]
+  );
+
   /** Cierra el inline abierto (cualquier fila); los Pressable hijos no disparan blur del TextInput. */
   const tryCommitInlineAtActiveSlot = useCallback(() => {
     if (titleEditReminderId) onCommitTitleEdit?.();
@@ -301,14 +315,13 @@ export function AgendaSchedule({
   const fs = (n: number) => scaledFontSize(n, fontScale);
   const rowMinH = Math.max(MIN_ROW_HEIGHT, Math.round(MIN_ROW_HEIGHT * fontScale));
   const eventTitleFontSize = fs(14);
-  const eventRowPaddingV = Math.max(3, Math.round(5 * fontScale));
+  const eventRowPaddingV = Math.max(2, Math.round(2 * fontScale));
   const eventRowPaddingH = Math.max(4, Math.round(6 * fontScale));
   const eventRowMinHeight = Math.round(eventTitleFontSize * 1.3) + 2 * eventRowPaddingV;
-  /** Alto por bloque de título: caben hasta ~2 líneas (varios eventos a la misma hora). */
-  const titleBlockMinH = Math.max(
-    eventRowMinHeight,
-    Math.round(eventTitleFontSize * 1.25 * 2) + 2 * eventRowPaddingV
-  );
+  /** Tamaño del reloj/nota (mismo que en las filas de evento). */
+  const eventIconSz = Math.max(12, Math.round(eventTitleFontSize * 0.85));
+  /** Mismo alto que la fila (una línea); no crece al escribir/enfocar. */
+  const titleBlockMinH = eventRowMinHeight;
 
   /** Agrupa recordatorios por índice de fila (ahora incluye los que se solapan con la fila). */
   const remindersByRowIndex = useMemo(() => {
@@ -354,7 +367,7 @@ export function AgendaSchedule({
         heightPx = Math.max(heightPx, needForTitles);
       }
       if (parseInlineSlotHourIndex(inlineSlot) === i) {
-        heightPx = Math.max(heightPx, slotPad + rowMinH + 8);
+        heightPx = Math.max(heightPx, slotPad + eventRowMinHeight);
       }
       layout.push({ durationMin, heightPx });
     }
@@ -401,6 +414,24 @@ export function AgendaSchedule({
       requestAnimationFrame(run);
     });
   }, [scrollFocusRequest, hours, hourMinutes, rowLayout, pinnedHeaderHeight]);
+
+  /** Al editar el título inline (evento recién creado), desplazar su fila a la parte alta, sobre el teclado. */
+  useEffect(() => {
+    if (!titleEditReminderId) return undefined;
+    const r = reminders.find((x) => x.id === titleEditReminderId);
+    if (!r || r.noTime) return undefined;
+    const startMin = timeToMinutes(r.startTime);
+    const run = () => {
+      const el = scrollRef.current;
+      if (!el) return;
+      const yGrid = yFromMinute(startMin, hours, hourMinutes, rowLayout);
+      const y = Math.max(0, pinnedHeaderHeight + yGrid - 70);
+      el.scrollTo({ y, animated: true });
+    };
+    // Tras abrir el teclado (el foco del input se retrasa 220/320ms).
+    const t = setTimeout(run, Platform.OS === 'android' ? 460 : 320);
+    return () => clearTimeout(t);
+  }, [titleEditReminderId, reminders, hours, hourMinutes, rowLayout, pinnedHeaderHeight]);
 
   /**
    * Una fila visual por cada "inicio" en esa hora: si hay 2 eventos a las 6:00, hay 2 filas con etiqueta "6:00".
@@ -639,13 +670,23 @@ export function AgendaSchedule({
          */
         hourRowSeparator: {
           position: 'absolute' as const,
-          left: 0,
+          // Los puntos empiezan DESPUÉS de la columna de horas (no sobre ni antes del número).
+          left: TIME_COLUMN_COMBINED_WIDTH,
           right: 0,
           bottom: 0,
-          borderTopWidth: StyleSheet.hairlineWidth,
-          borderStyle: 'dotted' as const,
-          borderColor: colors.line,
+          height: 3,
+          flexDirection: 'row' as const,
+          alignItems: 'center' as const,
+          overflow: 'hidden' as const,
+          zIndex: 4,
+          elevation: 4,
           pointerEvents: 'none' as const,
+        },
+        hourRowSeparatorDot: {
+          width: 2,
+          height: 2,
+          marginRight: 3,
+          backgroundColor: colors.textSecondary,
         },
         barPathOverlay: {
           position: 'absolute' as const,
@@ -678,14 +719,15 @@ export function AgendaSchedule({
           flexShrink: 0,
           pointerEvents: 'box-none' as const,
         },
-        /** Columna 2: hora centrada en la fila (vertical y horizontal), cajón de ancho fijo ajustado. */
+        /** Columna 2: hora alineada a la derecha (como el Palm), centrada en vertical. */
         hourColumn: {
           width: TIME_COLUMN_WIDTH,
           marginLeft: TIME_FRANJA_GAP,
           flexShrink: 0,
           justifyContent: 'center' as const,
-          alignItems: 'center' as const,
-          paddingHorizontal: 8,
+          alignItems: 'flex-end' as const,
+          paddingLeft: 2,
+          paddingRight: 8,
           zIndex: 2,
           pointerEvents: 'box-none' as const,
         },
@@ -696,7 +738,8 @@ export function AgendaSchedule({
           color: colors.textSecondary,
           fontFamily: 'PixelOperator',
           fontWeight: 'normal',
-          textAlign: 'center' as const,
+          textAlign: 'right' as const,
+          alignSelf: 'flex-end' as const,
           flexShrink: 0,
           ...(Platform.OS === 'android' ? { includeFontPadding: false } : {}),
         },
@@ -738,29 +781,31 @@ export function AgendaSchedule({
         eventTextTitle: {
           fontSize: eventTitleFontSize,
           lineHeight: Math.round(eventTitleFontSize * 1.25),
-          fontFamily: 'PixelOperator',
-          fontWeight: 'normal',
+          ...titleFont,
           color: colors.text,
           maxWidth: '100%' as const,
         },
         inlineRow: {
+          flexDirection: 'row' as const,
+          alignItems: 'center' as const,
           alignSelf: 'stretch' as const,
           minHeight: rowMinH,
           justifyContent: 'center' as const,
         },
         inlineInput: {
           flex: 1,
-          minHeight: 36,
+          minHeight: 20,
           borderWidth: 0,
           borderRadius: 0,
           borderColor: 'transparent',
-          paddingHorizontal: 10,
-          paddingVertical: 8,
+          paddingHorizontal: 4,
+          paddingVertical: 2,
           fontSize: fs(14),
           fontFamily: 'PixelOperator',
           fontWeight: 'normal',
           color: colors.text,
-          backgroundColor: colors.cardBackground,
+          // Sin caja: el campo se integra en la fila (el fondo grande quedaba feo al seleccionar la hora).
+          backgroundColor: 'transparent',
           ...(Platform.OS === 'web' ? ({ outlineStyle: 'none' as const, outlineWidth: 0 } as const) : {}),
         },
       }),
@@ -786,6 +831,7 @@ export function AgendaSchedule({
           style={[
             styles.pinnedRow,
             isSelected && r.id !== titleEditReminderId && styles.pinnedRowSelected,
+            { flexDirection: 'row', alignItems: 'center' },
           ]}
         >
           <TextInput
@@ -803,10 +849,27 @@ export function AgendaSchedule({
             onSubmitEditing={() => onCommitTitleEdit?.()}
             onBlur={() => onCommitTitleEdit?.()}
           />
+          {!r.noTime ? (
+            <Pressable
+              onPress={() => {
+                onCommitTitleEdit?.();
+                (onReminderHourPress ?? onReminderPress)?.(r);
+              }}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel="Hora del evento"
+            >
+              <Image
+                source={alarmaPng}
+                style={{ width: eventIconSz, height: eventIconSz, marginLeft: 8 }}
+                resizeMode="contain"
+              />
+            </Pressable>
+          ) : null}
         </View>
       );
     }
-    const iconSz = Math.max(24, Math.round(eventTitleFontSize * 1.45));
+    const iconSz = Math.max(12, Math.round(eventTitleFontSize * 0.85));
     return (
       <View
         key={r.id}
@@ -989,11 +1052,7 @@ export function AgendaSchedule({
                           </Pressable>
                         ) : eventsWithTitleHere.length === 0 ? (
                           <Pressable
-                            onPress={() => {
-                              if (titleEditReminderId) onCommitTitleEdit?.();
-                              if (inlineSlot != null) tryCommitInlineAtActiveSlot();
-                              onEmptyHourPress?.(hourLabel);
-                            }}
+                            onPress={rowSlotPress}
                             hitSlop={8}
                             accessibilityRole="button"
                             accessibilityLabel={`Hora ${hourLabel}, nuevo evento`}
@@ -1033,6 +1092,18 @@ export function AgendaSchedule({
                             onSubmitEditing={() => tryCommitInline(hourLabel, hourIndex)}
                             onBlur={() => tryCommitInline(hourLabel, hourIndex)}
                           />
+                          <Pressable
+                            onPressIn={() => openInlineHourPicker(hourLabel)}
+                            hitSlop={8}
+                            accessibilityRole="button"
+                            accessibilityLabel={`Hora ${hourLabel}, elegir horario`}
+                          >
+                            <Image
+                              source={alarmaPng}
+                              style={{ width: eventIconSz, height: eventIconSz, marginLeft: 8 }}
+                              resizeMode="contain"
+                            />
+                          </Pressable>
                         </View>
                       ) : (
                         <View style={styles.slotMain}>
@@ -1069,10 +1140,35 @@ export function AgendaSchedule({
                                       onSubmitEditing={() => onCommitTitleEdit?.()}
                                       onBlur={() => onCommitTitleEdit?.()}
                                     />
+                                    {/* Reloj visible en cuanto se edita el título (focus). */}
+                                    {!r.noTime ? (
+                                      <Pressable
+                                        onPress={() => {
+                                          onCommitTitleEdit?.();
+                                          (onReminderHourPress ?? onReminderPress)?.(r);
+                                        }}
+                                        hitSlop={8}
+                                        accessibilityRole="button"
+                                        accessibilityLabel="Hora del evento"
+                                      >
+                                        <Image
+                                          source={alarmaPng}
+                                          style={{ width: eventIconSz, height: eventIconSz, marginLeft: 8 }}
+                                          resizeMode="contain"
+                                        />
+                                      </Pressable>
+                                    ) : null}
+                                    {r.note?.trim() ? (
+                                      <Image
+                                        source={notaPng}
+                                        style={{ width: eventIconSz, height: eventIconSz, marginLeft: 6 }}
+                                        resizeMode="contain"
+                                      />
+                                    ) : null}
                                   </View>
                                 );
                               }
-                              const iconSz = Math.max(24, Math.round(eventTitleFontSize * 1.45));
+                              const iconSz = Math.max(12, Math.round(eventTitleFontSize * 0.85));
                               return (
                                 <View
                                   key={r.id}
@@ -1121,7 +1217,11 @@ export function AgendaSchedule({
                       )}
                     </View>
                   </View>
-                  <View style={styles.hourRowSeparator} />
+                  <View style={styles.hourRowSeparator} pointerEvents="none">
+                    {Array.from({ length: ROW_DOT_COUNT }, (_, di) => (
+                      <View key={di} style={styles.hourRowSeparatorDot} />
+                    ))}
+                  </View>
                 </View>
               );
             }

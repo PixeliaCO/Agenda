@@ -32,6 +32,7 @@
       "package": "com.warrioxproductionss.agendapalm"
     },
     "plugins": [
+      "./plugins/withNotifeeMavenRepo.js",
       "./plugins/withAgendaSystemAlarmChannel.js",
       "./plugins/withAgendaFullScreenAlarm.js",
       "./plugins/withAgendaAlarmLockscreen.js"

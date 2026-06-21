@@ -35,11 +35,34 @@ export type ThemeColors = {
   onAccentBg: string;
   /** Fondo de campos sobre tarjetas (inputs) */
   fieldFill: string;
+  /** Fondo de pantallas apiladas (detalles, opciones, ir a fecha…) */
+  viewScreenBackground: string;
+  /** Barra de título Palm: fondo gris claro; el selector de días va sobre este fondo */
+  agendaHeaderBg: string;
+  /** Letras y flechas del selector (negro Palm) */
+  agendaHeaderText: string;
+  /** Divisores finos entre celdas del selector */
+  agendaHeaderBorder: string;
+  /** Día seleccionado en la barra de letras (fondo azul, texto blanco) */
+  agendaHeaderSelectedBg: string;
+  agendaHeaderSelectedText: string;
+  /** Recuadro azul de la fecha ("8 Ene 26") */
+  agendaDateChipBg: string;
+  agendaDateChipText: string;
+  /** Línea azul sólida bajo la cabecera (y borde del grid) */
+  agendaHeaderRule: string;
+  /** Barra inferior gris retro (Palm) */
+  footerBg: string;
+  footerBorder: string;
+  footerText: string;
+  /** Bisel de botones retro (luz arriba-izq, sombra abajo-der) */
+  footerBevelLight: string;
+  footerBevelDark: string;
 };
 
-/** Claro: gris azulado suave, barras azul acero, acento azul intenso */
+/** Claro: fondo blanco, barras azul acero, acento azul intenso */
 export const lightTheme: ThemeColors = {
-  screenBackground: '#e8eef6',
+  screenBackground: '#ffffff',
   barBackground: '#9bb4d4',
   barBorder: '#6d8ab0',
   daySelectedBg: '#2563eb',
@@ -52,7 +75,7 @@ export const lightTheme: ThemeColors = {
   reminderAlt1: '#2d7d9a',
   reminderAlt2: '#4a6eb5',
   reminderAlt3: '#5b8fc9',
-  cardBackground: '#f4f8fc',
+  cardBackground: '#ffffff',
   backdrop: 'rgba(21, 34, 56, 0.48)',
   todayCellBg: '#d4e6f8',
   pressedBg: 'rgba(30, 73, 118, 0.08)',
@@ -65,6 +88,20 @@ export const lightTheme: ThemeColors = {
   strongBorder: '#243b53',
   onAccentBg: '#ffffff',
   fieldFill: '#ffffff',
+  viewScreenBackground: '#ffffff',
+  agendaHeaderBg: '#ffffff',
+  agendaHeaderText: '#15233a',
+  agendaHeaderBorder: '#5a6b85',
+  agendaHeaderSelectedBg: '#1332f6',
+  agendaHeaderSelectedText: '#ffffff',
+  agendaDateChipBg: '#1332f6',
+  agendaDateChipText: '#ffffff',
+  agendaHeaderRule: '#1332f6',
+  footerBg: '#c3c3c3',
+  footerBorder: '#888888',
+  footerText: '#1a1a1a',
+  footerBevelLight: '#ffffff',
+  footerBevelDark: '#888888',
 };
 
 /** Oscuro: azul marino / pizarra, acentos cielo */
@@ -95,6 +132,20 @@ export const darkTheme: ThemeColors = {
   strongBorder: '#94a3b8',
   onAccentBg: '#ffffff',
   fieldFill: '#0f172a',
+  viewScreenBackground: '#1e293b',
+  agendaHeaderBg: '#1e293b',
+  agendaHeaderText: '#e2e8f0',
+  agendaHeaderBorder: '#64748b',
+  agendaHeaderSelectedBg: '#3b82f6',
+  agendaHeaderSelectedText: '#ffffff',
+  agendaDateChipBg: '#1d4ed8',
+  agendaDateChipText: '#ffffff',
+  agendaHeaderRule: '#3b82f6',
+  footerBg: '#2b3444',
+  footerBorder: '#475569',
+  footerText: '#e2e8f0',
+  footerBevelLight: '#475569',
+  footerBevelDark: '#0c1019',
 };
 
 export const colors = lightTheme;

@@ -1,13 +1,12 @@
 /**
- * Modal "Detalles del evento": horario, fecha, alarma, repetición.
- * La nota se edita en un segundo modal independiente.
+ * Pantalla «Detalles del evento»: horario, fecha, alarma, repetición.
  */
 
 import React, { useState, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import {
   View,
   Text,
-  Modal,
+  Image,
   TouchableOpacity,
   Pressable,
   TextInput,
@@ -19,15 +18,38 @@ import {
   Keyboard,
   useWindowDimensions,
 } from 'react-native';
+import { Checkbox } from 'expo-checkbox';
+
+const notaPng = require('../../../assets/nota.png');
+/** Subrayado de puntos (el borde `dotted` de RN se rompe en Android). */
+const UNDERLINE_DOTS = Array.from({ length: 60 });
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { Reminder, AlarmUnit } from '../../types/reminder';
 import { usePreferences } from '../../contexts/PreferencesContext';
-import { time24To12, time12To24, formatTime12h, formatTime12hCompact, formatDateFull } from '../../utils/date';
+import {
+  time24To12,
+  time12To24,
+  formatTime12h,
+  formatTime12hCompact,
+  formatDatePalm,
+  getDayIndexFromDate,
+} from '../../utils/date';
 import { dayVisibleRangeToTimes } from '../../utils/scheduleHours';
 import { addHour } from '../../services/reminderService';
-import { scaledFontSize } from '../../utils/typography';
-import { ChangeRepeatModal, buildRepeatSummary } from '../ChangeRepeatModal';
-import { GoToDateModal } from '../GoToDateModal/GoToDateModal';
+import { scaledFontSize, titleFont } from '../../utils/typography';
+import { ChangeRepeatScreen, buildRepeatSummary, REPEAT_QUICK_OPTIONS, matchRepeatQuickOption, type RepeatQuickOptionId } from '../ChangeRepeatModal';
+import { GoToDateScreen } from '../GoToDateModal/GoToDateModal';
+import { EditCategoriesScreen } from '../EditCategoriesModal';
+import { PalmScreenShell, ScreenOverlay } from '../PalmScreenShell';
+import {
+  categoryColor,
+  categoryDisplayLabel,
+  EDIT_CATEGORIES_LABEL,
+  UNCategorized_COLOR,
+  UNCategorized_LABEL,
+  type CategoryItem,
+} from '../../constants/categories';
+import { getAllCategories } from '../../services/categoryService';
 
 export type EventDetailsModalProps = {
   visible: boolean;
@@ -37,6 +59,8 @@ export type EventDetailsModalProps = {
   defaultDate: string;
   /** Al crear desde la vista semana: hora sugerida (HH:mm 24h) */
   defaultStartTime?: string;
+  /** Texto ya escrito en la fila inline antes de abrir el selector de hora */
+  defaultTitle?: string;
   /** Rango de la cuadrícula para la fecha (todo el día = de inicio a fin de este rango) */
   getDayVisibleRange: (dateISO: string) => { startHour: number; endHour: number };
   /** id null → crear; con id → actualizar. Puede devolver Promise para cerrar el modal tras persistir. */
@@ -53,16 +77,19 @@ export type EventDetailsModalProps = {
       repeat?: Reminder['repeat'];
       repeatInterval?: number;
       repeatEndDate?: string;
+      repeatWeekdays?: number[];
       note?: string;
       allDay?: boolean;
       noTime?: boolean;
+      location?: string;
+      category?: string;
     }
   ) => void | Promise<void>;
   /** Eliminar evento (solo edición). */
   onDelete?: (id: string) => void | Promise<void>;
   onClose: () => void;
-  /** Al abrir: ir a la sección de alarma o abrir el modal de nota */
-  initialTarget?: 'alarm' | 'note' | null;
+  /** Al abrir: ir a alarma/nota o abrir directamente el selector de hora */
+  initialTarget?: 'alarm' | 'note' | 'time' | null;
 };
 
 /** Aire extra entre el formulario y el teclado en el modal. */
@@ -74,30 +101,113 @@ const PALM_MINUTE_STEPS = ['00', '05', '10', '15', '20', '25', '30', '35', '40',
 /** Filas visibles en cada columna hora/minuto del selector Palm. */
 const PALM_PICKER_ROW_COUNT = 12;
 
-/** En Android (HyperOS/MIUI) fade + KAV dentro de Modal transparente provoca ghosting. */
-const MODAL_ANIMATION = Platform.OS === 'android' ? ('none' as const) : ('fade' as const);
+const OUTLINE_DOT = 2;
+const OUTLINE_GAP = 3;
+const OUTLINE_RADIUS = 10;
+const OUTLINE_H_DOTS = 56;
+const OUTLINE_V_DOTS = 56;
 
-type ModalOverlayProps = {
-  style: object;
-  /** Solo iOS: KeyboardAvoidingView con padding. Android usa resize del manifest. */
-  avoidKeyboard?: boolean;
-  insets: { top: number };
+/** Borde redondeado de puntos (el `borderStyle: 'dotted'` de RN falla en Android). */
+function DottedRoundedOutline({
+  children,
+  color,
+  radius = OUTLINE_RADIUS,
+  style,
+}: {
   children: React.ReactNode;
-};
+  color: string;
+  radius?: number;
+  style?: object;
+}) {
+  const dotStyle = { width: OUTLINE_DOT, height: OUTLINE_DOT, backgroundColor: color };
+  const hDots = (prefix: string) =>
+    Array.from({ length: OUTLINE_H_DOTS }, (_, i) => (
+      <View key={`${prefix}${i}`} style={[dotStyle, i < OUTLINE_H_DOTS - 1 && { marginRight: OUTLINE_GAP }]} />
+    ));
+  const vDots = (prefix: string) =>
+    Array.from({ length: OUTLINE_V_DOTS }, (_, i) => (
+      <View key={`${prefix}${i}`} style={[dotStyle, i < OUTLINE_V_DOTS - 1 && { marginBottom: OUTLINE_GAP }]} />
+    ));
+  const cornerDots = [
+    { top: 1, left: 1 },
+    { top: 1, right: 1 },
+    { bottom: 1, left: 1 },
+    { bottom: 1, right: 1 },
+    { top: 4, left: 0 },
+    { top: 0, left: 4 },
+    { top: 4, right: 0 },
+    { top: 0, right: 4 },
+    { bottom: 4, left: 0 },
+    { bottom: 0, left: 4 },
+    { bottom: 4, right: 0 },
+    { bottom: 0, right: 4 },
+  ];
 
-function ModalOverlay({ style, avoidKeyboard = false, insets, children }: ModalOverlayProps) {
-  if (Platform.OS === 'ios' && avoidKeyboard) {
-    return (
-      <KeyboardAvoidingView
-        behavior="padding"
-        style={style}
-        keyboardVerticalOffset={Math.max(insets.top, 12)}
+  return (
+    <View
+      style={[
+        {
+          position: 'relative',
+          borderRadius: radius,
+          paddingHorizontal: 10,
+          paddingVertical: 6,
+          minHeight: 32,
+          backgroundColor: '#ffffff',
+        },
+        style,
+      ]}
+    >
+      <View
+        style={{ position: 'absolute', top: 0, left: radius, right: radius, overflow: 'hidden', height: OUTLINE_DOT }}
+        pointerEvents="none"
       >
-        {children}
-      </KeyboardAvoidingView>
-    );
-  }
-  return <View style={style}>{children}</View>;
+        <View style={{ flexDirection: 'row' }}>{hDots('t')}</View>
+      </View>
+      <View
+        style={{
+          position: 'absolute',
+          bottom: 0,
+          left: radius,
+          right: radius,
+          overflow: 'hidden',
+          height: OUTLINE_DOT,
+        }}
+        pointerEvents="none"
+      >
+        <View style={{ flexDirection: 'row' }}>{hDots('b')}</View>
+      </View>
+      <View
+        style={{
+          position: 'absolute',
+          top: radius,
+          bottom: radius,
+          left: 0,
+          width: OUTLINE_DOT,
+          overflow: 'hidden',
+        }}
+        pointerEvents="none"
+      >
+        <View style={{ flexDirection: 'column' }}>{vDots('l')}</View>
+      </View>
+      <View
+        style={{
+          position: 'absolute',
+          top: radius,
+          bottom: radius,
+          right: 0,
+          width: OUTLINE_DOT,
+          overflow: 'hidden',
+        }}
+        pointerEvents="none"
+      >
+        <View style={{ flexDirection: 'column' }}>{vDots('r')}</View>
+      </View>
+      {cornerDots.map((pos, i) => (
+        <View key={`c${i}`} style={[{ position: 'absolute' }, pos, dotStyle]} pointerEvents="none" />
+      ))}
+      {children}
+    </View>
+  );
 }
 
 type PalmHourRow = { label: string; hour: number; pm: boolean };
@@ -118,6 +228,21 @@ const ALARM_UNIT_OPTIONS: { value: AlarmUnit; label: string }[] = [
   { value: 'days', label: 'Días' },
 ];
 
+function CategoryDot({ color, size = 10 }: { color: string; size?: number }) {
+  return (
+    <View
+      style={{
+        width: size,
+        height: size,
+        borderRadius: size / 2,
+        backgroundColor: color,
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: 'rgba(0,0,0,0.15)',
+      }}
+    />
+  );
+}
+
 type DetailsPalmSnapshot = {
   startHour: string;
   startMin: string;
@@ -134,6 +259,7 @@ export function EventDetailsModal({
   reminder,
   defaultDate,
   defaultStartTime,
+  defaultTitle = '',
   getDayVisibleRange,
   onSave,
   onClose,
@@ -142,6 +268,15 @@ export function EventDetailsModal({
 }: EventDetailsModalProps) {
   const insets = useSafeAreaInsets();
   const detailsScrollRef = useRef<ScrollView>(null);
+  const detailsCardRef = useRef<View>(null);
+  const categoryAnchorRef = useRef<View>(null);
+  const repeatAnchorRef = useRef<View>(null);
+  const repeatSnapshotRef = useRef<{
+    repeat: Reminder['repeat'];
+    repeatInterval: number;
+    repeatEndDate?: string;
+    repeatWeekdays?: number[];
+  } | null>(null);
   const alarmSectionY = useRef(0);
   const detailsPalmSnapshotRef = useRef<DetailsPalmSnapshot | null>(null);
   const [keyboardPad, setKeyboardPad] = useState(0);
@@ -154,17 +289,32 @@ export function EventDetailsModal({
   const [dateISO, setDateISO] = useState('');
   const [allDay, setAllDay] = useState(false);
   const [noTime, setNoTime] = useState(false);
-  const [alarm, setAlarm] = useState(false);
+  const [alarm, setAlarm] = useState(true);
   const [alarmOffsetStr, setAlarmOffsetStr] = useState('0');
   const [alarmUnit, setAlarmUnit] = useState<AlarmUnit>('minutes');
   const [alarmUnitPickerVisible, setAlarmUnitPickerVisible] = useState(false);
   const [repeat, setRepeat] = useState<Reminder['repeat']>('none');
   const [repeatInterval, setRepeatInterval] = useState(1);
   const [repeatEndDate, setRepeatEndDate] = useState<string | undefined>(undefined);
+  const [repeatWeekdays, setRepeatWeekdays] = useState<number[] | undefined>(undefined);
   const [repeatModalVisible, setRepeatModalVisible] = useState(false);
+  const [repeatPickerVisible, setRepeatPickerVisible] = useState(false);
+  const [repeatMenuPos, setRepeatMenuPos] = useState<{
+    top: number;
+    left: number;
+    width: number;
+    maxHeight: number;
+  } | null>(null);
+  const [repeatEndDateQuickPickerVisible, setRepeatEndDateQuickPickerVisible] = useState(false);
   const [note, setNote] = useState('');
   const [noteModalVisible, setNoteModalVisible] = useState(false);
   const [noteDraft, setNoteDraft] = useState('');
+  const [location, setLocation] = useState('');
+  const [category, setCategory] = useState('');
+  const [categoryPickerVisible, setCategoryPickerVisible] = useState(false);
+  const [categoryMenuPos, setCategoryMenuPos] = useState<{ top: number; left: number; width: number } | null>(null);
+  const [editCategoriesVisible, setEditCategoriesVisible] = useState(false);
+  const [categories, setCategories] = useState<CategoryItem[]>([]);
   /** Nuevo evento + selector Palm: qué hora edita la columna derecha. */
   const [palmTimeFocus, setPalmTimeFocus] = useState<'start' | 'end'>('start');
   /** Columna de horas: lista AM o PM (flecha alterna). */
@@ -192,10 +342,159 @@ export function EventDetailsModal({
     if (!visible) {
       setNoteModalVisible(false);
       setAlarmUnitPickerVisible(false);
+      setCategoryPickerVisible(false);
+      setCategoryMenuPos(null);
+      setEditCategoriesVisible(false);
       setRepeatModalVisible(false);
+      setRepeatPickerVisible(false);
+      setRepeatMenuPos(null);
+      setRepeatEndDateQuickPickerVisible(false);
       setDatePickerVisible(false);
       setDetailsPalmPickerVisible(false);
     }
+  }, [visible]);
+
+  const refreshCategories = () => {
+    void getAllCategories().then(setCategories);
+  };
+
+  const openCategoryPicker = () => {
+    setAlarmUnitPickerVisible(false);
+    if (categoryPickerVisible) {
+      closeCategoryPicker();
+      return;
+    }
+    closeRepeatPicker();
+    const card = detailsCardRef.current;
+    const anchor = categoryAnchorRef.current;
+    if (!card || !anchor) {
+      setCategoryMenuPos(null);
+      setCategoryPickerVisible(true);
+      return;
+    }
+    anchor.measureLayout(
+      card,
+      (left, top, width, height) => {
+        setCategoryMenuPos({ top: top + height, left, width });
+        setCategoryPickerVisible(true);
+      },
+      () => {
+        setCategoryMenuPos(null);
+        setCategoryPickerVisible(true);
+      }
+    );
+  };
+
+  const closeCategoryPicker = () => {
+    setCategoryPickerVisible(false);
+    setCategoryMenuPos(null);
+  };
+
+  const closeRepeatPicker = () => {
+    setRepeatPickerVisible(false);
+    setRepeatMenuPos(null);
+  };
+
+  const openRepeatPicker = () => {
+    setAlarmUnitPickerVisible(false);
+    closeCategoryPicker();
+    if (repeatPickerVisible) {
+      closeRepeatPicker();
+      return;
+    }
+    const anchor = repeatAnchorRef.current;
+    if (!anchor) {
+      setRepeatMenuPos(null);
+      setRepeatPickerVisible(true);
+      return;
+    }
+    anchor.measureInWindow((x, y, width, height) => {
+      const menuTop = y + height + 2;
+      const maxHeight = Math.max(120, Math.min(320, windowHeight - menuTop - insets.bottom - 16));
+      setRepeatMenuPos({ top: menuTop, left: x, width, maxHeight });
+      setRepeatPickerVisible(true);
+    });
+  };
+
+  const applyRepeatQuickOption = (optionId: RepeatQuickOptionId) => {
+    closeRepeatPicker();
+    if (optionId === 'other') {
+      setRepeatModalVisible(true);
+      return;
+    }
+    const eventWeekday = getDayIndexFromDate(dateISO || defaultDate);
+    if (optionId === 'none') {
+      setRepeat('none');
+      setRepeatInterval(1);
+      setRepeatEndDate(undefined);
+      setRepeatWeekdays(undefined);
+      return;
+    }
+    if (optionId === 'daily_until') {
+      repeatSnapshotRef.current = {
+        repeat,
+        repeatInterval,
+        repeatEndDate,
+        repeatWeekdays,
+      };
+      setRepeat('daily');
+      setRepeatInterval(1);
+      setRepeatWeekdays(undefined);
+      setRepeatEndDateQuickPickerVisible(true);
+      return;
+    }
+    if (optionId === 'weekly') {
+      setRepeat('weekly');
+      setRepeatInterval(1);
+      setRepeatEndDate(undefined);
+      setRepeatWeekdays([eventWeekday]);
+      return;
+    }
+    if (optionId === 'biweekly') {
+      setRepeat('weekly');
+      setRepeatInterval(2);
+      setRepeatEndDate(undefined);
+      setRepeatWeekdays([eventWeekday]);
+      return;
+    }
+    if (optionId === 'monthly') {
+      setRepeat('monthly');
+      setRepeatInterval(1);
+      setRepeatEndDate(undefined);
+      setRepeatWeekdays(undefined);
+      return;
+    }
+    if (optionId === 'yearly') {
+      setRepeat('yearly');
+      setRepeatInterval(1);
+      setRepeatEndDate(undefined);
+      setRepeatWeekdays(undefined);
+    }
+  };
+
+  const dismissRepeatEndDateQuickPicker = () => {
+    const snap = repeatSnapshotRef.current;
+    if (snap) {
+      setRepeat(snap.repeat ?? 'none');
+      setRepeatInterval(snap.repeatInterval);
+      setRepeatEndDate(snap.repeatEndDate);
+      setRepeatWeekdays(snap.repeatWeekdays);
+    }
+    repeatSnapshotRef.current = null;
+    setRepeatEndDateQuickPickerVisible(false);
+  };
+
+  const confirmRepeatEndDateQuickPicker = (endISO: string) => {
+    setRepeat('daily');
+    setRepeatInterval(1);
+    setRepeatEndDate(endISO);
+    setRepeatWeekdays(undefined);
+    repeatSnapshotRef.current = null;
+    setRepeatEndDateQuickPickerVisible(false);
+  };
+
+  useEffect(() => {
+    if (visible) refreshCategories();
   }, [visible]);
 
   useLayoutEffect(() => {
@@ -214,7 +513,7 @@ export function EventDetailsModal({
       setDateISO(reminder.date);
       setAllDay(Boolean(reminder.allDay));
       setNoTime(Boolean(reminder.noTime));
-      setAlarm(reminder.noTime ? false : (reminder.alarm ?? false));
+      setAlarm(reminder.noTime ? false : (reminder.alarm ?? true));
       setAlarmOffsetStr(
         reminder.alarmOffset != null && reminder.alarmOffset >= 0
           ? String(reminder.alarmOffset)
@@ -222,13 +521,26 @@ export function EventDetailsModal({
       );
       setAlarmUnit(reminder.alarmUnit ?? 'minutes');
       setAlarmUnitPickerVisible(false);
+      closeCategoryPicker();
       setRepeat(reminder.repeat ?? 'none');
       setRepeatInterval(
         reminder.repeatInterval != null && reminder.repeatInterval >= 1 ? reminder.repeatInterval : 1
       );
       setRepeatEndDate(reminder.repeatEndDate);
+      setRepeatWeekdays(
+        reminder.repeatWeekdays?.length
+          ? [...reminder.repeatWeekdays]
+          : reminder.repeat === 'weekly'
+            ? [getDayIndexFromDate(reminder.date)]
+            : undefined
+      );
       setRepeatModalVisible(false);
+      setRepeatPickerVisible(false);
+      setRepeatMenuPos(null);
+      setRepeatEndDateQuickPickerVisible(false);
       setNote(reminder.note ?? '');
+      setLocation(reminder.location ?? '');
+      setCategory(reminder.category ?? '');
       setNoteModalVisible(false);
       if (initialTarget === 'note') {
         queueMicrotask(() => {
@@ -237,30 +549,62 @@ export function EventDetailsModal({
         });
       }
       setPalmTimeFocus('start');
-      setPalmPickerPm(time24To12(reminder.noTime ? '00:00' : reminder.startTime).pm);
-      setDetailsPalmPickerVisible(false);
+      setPalmPickerPm(s.pm);
+      if (initialTarget === 'time' && !reminder.noTime && !reminder.allDay) {
+        queueMicrotask(() => {
+          detailsPalmSnapshotRef.current = {
+            startHour: String(s.hour),
+            startMin: String(s.min).padStart(2, '0'),
+            startPm: s.pm,
+            endHour: String(e.hour),
+            endMin: String(e.min).padStart(2, '0'),
+            endPm: e.pm,
+            allDay: Boolean(reminder.allDay),
+            noTime: Boolean(reminder.noTime),
+          };
+          setDetailsPalmPickerVisible(true);
+        });
+      } else {
+        setDetailsPalmPickerVisible(false);
+      }
       return;
     }
     setDateISO(defaultDate);
     setAllDay(false);
     setNoTime(false);
-    setStartHour('');
-    setStartMin('');
-    setStartPm(false);
-    setEndHour('');
-    setEndMin('');
-    setEndPm(false);
-    setPalmPickerPm(false);
-    setAlarm(false);
+    // Hora-primero: si se tocó una franja concreta, prellenar el selector con esa hora (modificable).
+    if (defaultStartTime && defaultStartTime.includes(':')) {
+      const s = time24To12(defaultStartTime);
+      const e = time24To12(addHour(defaultStartTime));
+      setStartHour(String(s.hour));
+      setStartMin(String(s.min).padStart(2, '0'));
+      setStartPm(s.pm);
+      setEndHour(String(e.hour));
+      setEndMin(String(e.min).padStart(2, '0'));
+      setEndPm(e.pm);
+      setPalmPickerPm(s.pm);
+    } else {
+      setStartHour('');
+      setStartMin('');
+      setStartPm(false);
+      setEndHour('');
+      setEndMin('');
+      setEndPm(false);
+      setPalmPickerPm(false);
+    }
+    setAlarm(true);
     setAlarmOffsetStr('5');
     setAlarmUnit('minutes');
     setRepeat('none');
     setRepeatInterval(1);
     setRepeatEndDate(undefined);
+    setRepeatWeekdays(undefined);
     setNote('');
+    setLocation('');
+    setCategory('');
     setNoteModalVisible(false);
     setPalmTimeFocus('start');
-  }, [visible, reminder, defaultDate, initialTarget]);
+  }, [visible, reminder, defaultDate, defaultStartTime, initialTarget]);
 
   useEffect(() => {
     if (!visible || initialTarget !== 'alarm') return;
@@ -306,11 +650,20 @@ export function EventDetailsModal({
 
   const getRepeatPayload = () =>
     repeat === 'none'
-      ? { repeat: 'none' as const, repeatInterval: undefined, repeatEndDate: undefined }
+      ? {
+          repeat: 'none' as const,
+          repeatInterval: undefined,
+          repeatEndDate: undefined,
+          repeatWeekdays: undefined,
+        }
       : {
           repeat,
           repeatInterval: Math.max(1, repeatInterval),
           repeatEndDate: repeatEndDate?.trim() || undefined,
+          repeatWeekdays:
+            repeat === 'weekly' && repeatWeekdays?.length
+              ? [...repeatWeekdays].sort((a, b) => a - b)
+              : undefined,
         };
 
   const performSave = async (p: {
@@ -320,32 +673,26 @@ export function EventDetailsModal({
     endTime: string;
   }) => {
     const isNewEvent = reminder === null;
-    const title = isNewEvent ? '' : (reminder.title?.trim() || 'Evento');
+    const title = isNewEvent ? defaultTitle.trim() : (reminder.title?.trim() || 'Evento');
     const repeatPayload = getRepeatPayload();
     const { payloadNoTime, payloadAllDay, startTime, endTime } = p;
 
     let saveAlarm = false;
     let saveAlarmOffset: number | undefined;
     let saveAlarmUnit: AlarmUnit | undefined;
-    if (!payloadNoTime) {
-      if (isNewEvent) {
-        saveAlarm = true;
-        saveAlarmOffset = 5;
-        saveAlarmUnit = 'minutes';
-      } else if (alarm) {
-        const offset = parseInt(alarmOffsetStr.trim(), 10);
-        if (!Number.isFinite(offset) || offset < 1) {
-          Alert.alert('Alarma', 'Indica un anticipo mayor que cero (número entero).');
-          return;
-        }
-        if (offset > 9999) {
-          Alert.alert('Alarma', 'El valor es demasiado grande.');
-          return;
-        }
-        saveAlarm = true;
-        saveAlarmOffset = offset;
-        saveAlarmUnit = alarmUnit;
+    if (!payloadNoTime && alarm) {
+      const offset = parseInt(alarmOffsetStr.trim(), 10);
+      if (!Number.isFinite(offset) || offset < 1) {
+        Alert.alert('Alarma', 'Indica un anticipo mayor que cero (número entero).');
+        return;
       }
+      if (offset > 9999) {
+        Alert.alert('Alarma', 'El valor es demasiado grande.');
+        return;
+      }
+      saveAlarm = true;
+      saveAlarmOffset = offset;
+      saveAlarmUnit = alarmUnit;
     }
 
     await Promise.resolve(
@@ -361,6 +708,8 @@ export function EventDetailsModal({
         noTime: payloadNoTime,
         ...repeatPayload,
         note: note.trim() || undefined,
+        location: location.trim() || undefined,
+        category: category.trim() || undefined,
       })
     );
     onClose();
@@ -463,14 +812,14 @@ export function EventDetailsModal({
           width: '100%' as const,
           maxWidth: 440,
           maxHeight: '92%' as const,
-          backgroundColor: colors.cardBackground,
+          backgroundColor: '#ffffff',
           borderWidth: 1,
           borderColor: colors.line,
           borderRadius: 0,
           paddingHorizontal: 16,
           paddingTop: 12,
           paddingBottom: 10,
-          overflow: 'hidden' as const,
+          overflow: 'visible' as const,
           zIndex: 2,
         },
         backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: colors.backdrop },
@@ -490,14 +839,13 @@ export function EventDetailsModal({
           justifyContent: 'center',
           marginBottom: 20,
         },
-        headerTitle: { fontSize: fs(18), color: colors.text, fontFamily: 'PixelOperator', fontWeight: 'normal' },
+        headerTitle: { fontSize: fs(18), color: colors.text, ...titleFont },
         sectionTitle: {
           fontSize: fs(13),
           color: colors.textSecondary,
           marginBottom: 10,
           marginTop: 4,
-          fontFamily: 'PixelOperator',
-          fontWeight: 'normal',
+          ...titleFont,
         },
         /** Contenedor con borde para agrupar título + opciones */
         sectionBlock: {
@@ -511,8 +859,7 @@ export function EventDetailsModal({
         /** Título de sección con línea inferior */
         sectionTitleBordered: {
           fontSize: fs(12),
-          fontFamily: 'PixelOperator',
-          fontWeight: 'normal',
+          ...titleFont,
           color: colors.textSecondary,
           letterSpacing: 0.4,
           textTransform: 'uppercase' as const,
@@ -521,7 +868,7 @@ export function EventDetailsModal({
           borderBottomWidth: StyleSheet.hairlineWidth,
           borderBottomColor: colors.line,
         },
-        titleText: { fontSize: fs(16), color: colors.text, marginTop: 2, fontFamily: 'PixelOperator', fontWeight: 'normal' },
+        titleText: { fontSize: fs(16), color: colors.text, marginTop: 2, ...titleFont },
         titleInput: {
           borderWidth: 1,
           borderColor: colors.line,
@@ -549,33 +896,27 @@ export function EventDetailsModal({
         label: { fontSize: fs(14), color: colors.textSecondary, minWidth: 70, fontFamily: 'PixelOperator', fontWeight: 'normal' },
         dateInfo: { fontSize: fs(14), color: colors.text, flex: 1, fontFamily: 'PixelOperator', fontWeight: 'normal' },
         timeGroupInline: { flexDirection: 'row', alignItems: 'center', gap: 2 },
-        checkboxRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 0 },
-        checkbox: {
-          width: 22,
-          height: 22,
-          borderWidth: 2,
-          borderColor: colors.line,
-          borderRadius: 0,
-          marginRight: 10,
-          alignItems: 'center',
-          justifyContent: 'center',
-        },
-        checkboxChecked: { backgroundColor: colors.daySelectedBg, borderColor: colors.daySelectedBg },
+        alarmCheckbox: { width: 20, height: 20 },
         actions: {
           flexDirection: 'row',
-          flexWrap: 'wrap',
+          flexWrap: 'nowrap',
           alignItems: 'center',
           justifyContent: 'center',
-          gap: 12,
+          gap: 8,
           marginTop: 20,
           paddingTop: 16,
           borderTopWidth: 1,
           borderTopColor: colors.line,
         },
-        btn: { paddingVertical: 10, paddingHorizontal: 20, borderRadius: 0, borderWidth: 1.5, borderColor: colors.line },
-        btnPrimary: { backgroundColor: colors.daySelectedBg, borderColor: colors.daySelectedBg },
-        btnText: { fontSize: fs(14), color: colors.text, fontFamily: 'PixelOperator', fontWeight: 'normal' },
-        btnTextPrimary: { color: colors.onAccentBg },
+        btn: {
+          paddingVertical: 8,
+          paddingHorizontal: 12,
+          borderRadius: 10,
+          borderWidth: 1,
+          borderColor: colors.footerText,
+          backgroundColor: colors.screenBackground,
+        },
+        btnText: { fontSize: fs(14), color: colors.footerText, fontFamily: 'PixelOperator', fontWeight: 'normal' },
         btnTextDanger: { color: '#c62828' },
         timeInputsRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1, flexWrap: 'wrap' },
         timeInputSmall: {
@@ -618,8 +959,7 @@ export function EventDetailsModal({
           fontSize: fs(17),
           color: colors.text,
           marginBottom: 12,
-          fontFamily: 'PixelOperator',
-          fontWeight: 'normal',
+          ...titleFont,
         },
         noteModalInput: {
           borderWidth: 1,
@@ -644,8 +984,14 @@ export function EventDetailsModal({
           marginTop: 16,
         },
         noteModalActionsEnd: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginLeft: 'auto' },
-        noteModalBtn: { paddingVertical: 10, paddingHorizontal: 18, borderRadius: 0, borderWidth: 1, borderColor: colors.line },
-        noteModalBtnPrimary: { backgroundColor: colors.daySelectedBg, borderColor: colors.daySelectedBg },
+        noteModalBtn: {
+          paddingVertical: 10,
+          paddingHorizontal: 18,
+          borderRadius: 10,
+          borderWidth: 1,
+          borderColor: colors.footerText,
+          backgroundColor: colors.screenBackground,
+        },
         noteModalBtnDanger: { paddingVertical: 10, paddingHorizontal: 14, borderRadius: 0, borderWidth: 1.5, borderColor: '#c62828' },
         alarmOptionsBlock: { marginTop: 12, paddingTop: 12, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.line, paddingLeft: 0 },
         alarmAnticipationLabel: {
@@ -670,43 +1016,94 @@ export function EventDetailsModal({
           maxWidth: 88,
           textAlign: 'center' as const,
         },
-        alarmUnitTrigger: {
-          flexDirection: 'row',
-          alignItems: 'center',
-          gap: 6,
+        alarmUnitMenu: {
+          position: 'absolute' as const,
+          top: 32,
+          left: 0,
+          right: 0,
+          backgroundColor: colors.cardBackground,
           borderWidth: 1,
           borderColor: colors.line,
-          borderRadius: 0,
-          paddingHorizontal: 14,
-          paddingVertical: 10,
-          backgroundColor: colors.cardBackground,
+          zIndex: 20,
+          elevation: 8,
         },
-        alarmUnitTriggerText: { fontSize: fs(15), color: colors.text, fontFamily: 'PixelOperator', fontWeight: 'normal' },
-        alarmUnitChevron: { fontSize: fs(12), color: colors.textSecondary },
-        unitPickerCard: {
-          width: '100%' as const,
-          maxWidth: 320,
-          backgroundColor: colors.cardBackground,
-          borderRadius: 0,
-          paddingVertical: 8,
-          borderWidth: 1,
-          borderColor: colors.line,
-        },
-        unitPickerTitle: {
-          fontSize: fs(15),
-          fontFamily: 'PixelOperator',
-          fontWeight: 'normal',
-          color: colors.textSecondary,
-          paddingHorizontal: 18,
-          paddingVertical: 10,
-        },
-        unitPickerOption: {
-          paddingVertical: 14,
-          paddingHorizontal: 18,
+        alarmUnitMenuOption: {
+          paddingVertical: 12,
+          paddingHorizontal: 10,
           borderTopWidth: StyleSheet.hairlineWidth,
           borderTopColor: colors.line,
         },
-        unitPickerOptionText: { fontSize: fs(16), color: colors.text, fontFamily: 'PixelOperator', fontWeight: 'normal' },
+        alarmUnitMenuOptionText: {
+          fontSize: fs(14),
+          color: colors.text,
+          fontFamily: 'PixelOperator',
+          fontWeight: 'normal' as const,
+        },
+        categoryMenu: {
+          position: 'absolute' as const,
+          backgroundColor: colors.cardBackground,
+          borderWidth: 1,
+          borderColor: colors.line,
+          maxHeight: 220,
+          zIndex: 2,
+          elevation: 12,
+        },
+        categoryMenuOverlay: {
+          ...StyleSheet.absoluteFillObject,
+          zIndex: 100,
+          elevation: 20,
+        },
+        categoryMenuScroll: {
+          maxHeight: 220,
+        },
+        categoryMenuOption: {
+          flexDirection: 'row' as const,
+          alignItems: 'center' as const,
+          gap: 8,
+          paddingVertical: 10,
+          paddingHorizontal: 10,
+          borderTopWidth: StyleSheet.hairlineWidth,
+          borderTopColor: colors.line,
+        },
+        categoryMenuOptionSelected: {
+          backgroundColor: colors.daySelectedBg,
+        },
+        categoryMenuOptionText: {
+          fontSize: fs(14),
+          color: colors.text,
+          fontFamily: 'PixelOperator',
+          fontWeight: 'normal' as const,
+          flex: 1,
+        },
+        categoryMenuOptionTextSelected: {
+          color: colors.onAccentBg,
+        },
+        categoryMenuSeparator: {
+          borderTopWidth: StyleSheet.hairlineWidth,
+          borderTopColor: colors.strongBorder,
+          marginTop: 2,
+        },
+        floatingMenu: {
+          position: 'absolute' as const,
+          backgroundColor: colors.cardBackground,
+          borderWidth: 1,
+          borderColor: colors.line,
+          zIndex: 2,
+          elevation: 24,
+          shadowColor: '#000',
+          shadowOffset: { width: 0, height: 4 },
+          shadowOpacity: 0.22,
+          shadowRadius: 8,
+        },
+        floatingMenuScroll: {
+          flexGrow: 0,
+        },
+        categoryFieldRow: {
+          flexDirection: 'row' as const,
+          alignItems: 'center' as const,
+          gap: 8,
+          flex: 1,
+        },
         palmRoot: {
           flexDirection: 'row' as const,
           alignItems: 'flex-start' as const,
@@ -731,8 +1128,7 @@ export function EventDetailsModal({
         palmSetTimeTitle: {
           fontSize: fs(15),
           color: colors.text,
-          fontFamily: 'PixelOperator',
-          fontWeight: 'normal' as const,
+          ...titleFont,
         },
         palmHelpIcon: { fontSize: fs(16), color: colors.textSecondary, padding: 4 },
         palmFieldLabel: {
@@ -791,16 +1187,23 @@ export function EventDetailsModal({
           borderTopWidth: StyleSheet.hairlineWidth,
           borderTopColor: colors.line,
         },
-        palmBarBtn: { paddingVertical: 8, paddingHorizontal: 4 },
+        palmBarBtn: {
+          paddingVertical: 8,
+          paddingHorizontal: 12,
+          borderRadius: 10,
+          borderWidth: 1,
+          borderColor: colors.footerText,
+          backgroundColor: colors.screenBackground,
+        },
         palmBarOkText: {
           fontSize: fs(16),
-          color: colors.daySelectedBg,
+          color: colors.footerText,
           fontFamily: 'PixelOperator',
           fontWeight: 'normal' as const,
         },
         palmBarCancelText: {
           fontSize: fs(16),
-          color: colors.textSecondary,
+          color: colors.footerText,
           fontFamily: 'PixelOperator',
           fontWeight: 'normal' as const,
         },
@@ -867,7 +1270,7 @@ export function EventDetailsModal({
           fontFamily: 'PixelOperator',
           fontWeight: 'normal' as const,
         },
-        pdScroll: { flexGrow: 1, flexShrink: 1, maxHeight: 380, backgroundColor: colors.cardBackground },
+        pdScroll: { flex: 1, backgroundColor: colors.viewScreenBackground },
         pdBodyPad: {
           paddingHorizontal: 4,
           paddingTop: 6,
@@ -878,28 +1281,77 @@ export function EventDetailsModal({
         },
         pdRow: { flexDirection: 'row' as const, alignItems: 'flex-start' as const, marginBottom: 8, gap: 6 },
         pdLabel: {
-          width: 72,
+          width: 96,
           fontSize: fs(13),
           fontFamily: 'PixelOperator',
           fontWeight: 'normal' as const,
           color: colors.textSecondary,
           paddingTop: 6,
         },
-        pdFieldBox: {
-          flex: 1,
-          backgroundColor: colors.fieldFill,
-          borderWidth: 1,
-          borderColor: colors.line,
-          paddingHorizontal: 10,
-          paddingVertical: 8,
-          minHeight: 36,
+        /** Columna que envuelve el valor del campo + su subrayado de puntos. */
+        pdFieldCol: { flex: 1 },
+        /** Fila del valor (sin caja; solo subrayado inferior). */
+        pdFieldRow: {
+          flexDirection: 'row' as const,
+          alignItems: 'center' as const,
+          minHeight: 28,
+          paddingHorizontal: 2,
+          paddingVertical: 4,
+          backgroundColor: '#ffffff',
         },
+        pdPickerRow: {
+          flexDirection: 'row' as const,
+          alignItems: 'center' as const,
+          minHeight: 20,
+        },
+        /** Flecha ▼ visible al final de cada selector. */
+        pdFieldChevron: { fontSize: fs(11), color: colors.textSecondary, marginLeft: 8 },
+        /** Subrayado de puntos (línea inferior). */
+        fieldUnderline: { flexDirection: 'row' as const, overflow: 'hidden' as const, height: 2 },
+        fieldUnderlineDot: { width: 2, height: 2, marginRight: 3, backgroundColor: colors.textSecondary },
+        /** Alarma en una sola fila: ancho fijo para número y unidad (el subrayado no ensancha). */
+        alarmNumberCol: { width: 44 },
+        alarmUnitCol: { flex: 1, minWidth: 96, position: 'relative' as const },
+        alarmFieldsRow: { flex: 1, flexDirection: 'row' as const, gap: 8, alignItems: 'flex-end' as const },
+        /** Checkbox + campos alineados con el resto de filas Palm (pdLabel paddingTop). */
+        alarmInlineControls: {
+          flex: 1,
+          flexDirection: 'row' as const,
+          alignItems: 'center' as const,
+          gap: 8,
+          marginTop: 6,
+          minHeight: 28,
+        },
+        alarmCheckboxWrap: { height: 28, justifyContent: 'center' as const },
+        /** Altura fija para que número, unidad y subrayado queden a la misma altura. */
+        alarmFieldContent: {
+          height: 28,
+          justifyContent: 'center' as const,
+          paddingHorizontal: 2,
+          backgroundColor: '#ffffff',
+        },
+        alarmNumberInput: {
+          height: 28,
+          minHeight: 28,
+          paddingVertical: 0,
+          paddingTop: 0,
+          paddingBottom: 0,
+          textAlignVertical: 'center' as const,
+          ...(Platform.OS === 'android' ? { includeFontPadding: false } : {}),
+        },
+        alarmUnitRow: { height: 28, minHeight: 28, paddingVertical: 0 },
         pdFieldText: {
           fontSize: fs(14),
           fontFamily: 'PixelOperator',
           fontWeight: 'normal' as const,
           color: colors.text,
-          marginBottom: 4,
+          marginBottom: 0,
+        },
+        pdFieldTextEmphasis: {
+          fontSize: fs(15),
+          fontFamily: 'PixelOperator',
+          fontWeight: 'normal' as const,
+          color: colors.text,
         },
         pdMiniRow: { flexDirection: 'row' as const, flexWrap: 'wrap' as const, gap: 6, marginTop: 6 },
         pdMiniToggle: {
@@ -912,12 +1364,59 @@ export function EventDetailsModal({
         pdMiniToggleOn: { backgroundColor: colors.todayCellBg, borderColor: colors.daySelectedBg },
         pdMiniToggleText: { fontSize: fs(12), fontFamily: 'PixelOperator', fontWeight: 'normal' as const, color: colors.text },
         pdCheckboxRow: { flexDirection: 'row' as const, alignItems: 'center' as const, marginBottom: 8, gap: 8 },
+        /** Cabecera azul "Detalles de la cita" (sangra a los bordes de la tarjeta). */
+        palmModalHeader: {
+          flexDirection: 'row' as const,
+          alignItems: 'center' as const,
+          backgroundColor: colors.agendaDateChipBg,
+          paddingHorizontal: 10,
+          paddingVertical: 7,
+          marginHorizontal: -16,
+          marginTop: -12,
+          marginBottom: 10,
+        },
+        palmModalHeaderTitle: {
+          flex: 1,
+          textAlign: 'center' as const,
+          fontSize: fs(15),
+          color: colors.agendaDateChipText,
+          ...titleFont,
+        },
+        palmHeaderRight: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 10 },
+        // Sin PixelOperator: la fuente pixel no trae ⓘ/✕; uso la del sistema.
+        palmHeaderInfo: { fontSize: fs(15), color: colors.agendaDateChipText },
+        palmHeaderClose: {
+          fontSize: fs(17),
+          color: colors.agendaDateChipText,
+          paddingHorizontal: 4,
+        },
+        pdFieldInput: {
+          backgroundColor: '#ffffff',
+          paddingHorizontal: 2,
+          paddingVertical: 4,
+          minHeight: 28,
+          fontSize: fs(14),
+          fontFamily: 'PixelOperator',
+          fontWeight: 'normal' as const,
+          color: colors.text,
+        },
         palmScrollItemTextActive: { color: colors.onAccentBg },
       }),
     [colors, fontScale]
   );
 
+  const renderUnderline = () => (
+    <View style={styles.fieldUnderline} pointerEvents="none">
+      {UNDERLINE_DOTS.map((_, i) => (
+        <View key={i} style={styles.fieldUnderlineDot} />
+      ))}
+    </View>
+  );
+
   const openNoteModal = () => {
+    setAlarmUnitPickerVisible(false);
+    closeCategoryPicker();
+    closeRepeatPicker();
     setNoteDraft(note);
     setNoteModalVisible(true);
   };
@@ -935,16 +1434,6 @@ export function EventDetailsModal({
     setNote('');
     setNoteDraft('');
     setNoteModalVisible(false);
-  };
-
-  const toggleAlarm = () => {
-    if (alarm) {
-      setAlarm(false);
-    } else {
-      setAlarm(true);
-      const raw = alarmOffsetStr.trim();
-      if (!raw || raw === '0') setAlarmOffsetStr('5');
-    }
   };
 
   const toggleAllDay = () => {
@@ -1031,6 +1520,8 @@ export function EventDetailsModal({
     };
     setPalmTimeFocus('start');
     if (startHour.trim() !== '') setPalmPickerPm(startPm);
+    setAlarmUnitPickerVisible(false);
+    closeRepeatPicker();
     setDetailsPalmPickerVisible(true);
   };
 
@@ -1371,60 +1862,228 @@ export function EventDetailsModal({
     </>
   );
 
-  return (
-    <>
-      <Modal visible={visible} animationType={MODAL_ANIMATION} transparent>
-        {reminder ? (
-        <ModalOverlay avoidKeyboard style={styles.overlayCenter} insets={insets}>
-          <TouchableOpacity style={styles.newEventBackdrop} activeOpacity={1} onPress={onClose} />
-          <View style={styles.detailsCenterCard}>
-            <ScrollView
-              ref={detailsScrollRef}
-              style={styles.pdScroll}
-              contentContainerStyle={styles.pdBodyPad}
-              keyboardShouldPersistTaps="handled"
-              keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
-              automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
-              nestedScrollEnabled={false}
-            >
+  if (!visible) return null;
+
+  if (editCategoriesVisible) {
+    return (
+      <EditCategoriesScreen
+        onDismiss={() => setEditCategoriesVisible(false)}
+        onSaved={refreshCategories}
+      />
+    );
+  }
+
+  if (repeatEndDateQuickPickerVisible) {
+    return (
+      <GoToDateScreen
+        title="Diario hasta"
+        initialDate={
+          repeatEndDate && /^\d{4}-\d{2}-\d{2}$/.test(repeatEndDate)
+            ? repeatEndDate
+            : dateISO || defaultDate
+        }
+        reminders={[]}
+        onSelectDate={confirmRepeatEndDateQuickPicker}
+        onClose={dismissRepeatEndDateQuickPicker}
+      />
+    );
+  }
+
+  if (repeatModalVisible) {
+    return (
+      <ChangeRepeatScreen
+        frequency={repeat ?? 'none'}
+        interval={repeatInterval}
+        endDateISO={repeatEndDate}
+        weekdays={repeatWeekdays}
+        eventDateISO={dateISO}
+        onApply={(f, int, end, days) => {
+          setRepeat(f);
+          setRepeatInterval(int);
+          setRepeatEndDate(end);
+          setRepeatWeekdays(f === 'weekly' && days?.length ? days : undefined);
+          setRepeatModalVisible(false);
+        }}
+        onDismiss={() => setRepeatModalVisible(false)}
+      />
+    );
+  }
+
+  if (noteModalVisible) {
+    const noteFooter = (
+      <View style={styles.noteModalActions}>
+        <TouchableOpacity style={styles.noteModalBtnDanger} onPress={clearNoteFromModal}>
+          <Text style={styles.btnTextDanger}>Borrar nota</Text>
+        </TouchableOpacity>
+        <View style={styles.noteModalActionsEnd}>
+          <TouchableOpacity style={styles.noteModalBtn} onPress={dismissNoteModal}>
+            <Text style={styles.btnText}>Cancelar</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.noteModalBtn} onPress={confirmNoteModal}>
+            <Text style={styles.btnText}>Guardar</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+    const noteBody = (
+      <TextInput
+        style={[styles.noteModalInput, { flex: 1, margin: 14 }]}
+        value={noteDraft}
+        onChangeText={setNoteDraft}
+        placeholder="Escribe una nota..."
+        placeholderTextColor={colors.placeholder}
+        multiline
+        autoFocus
+      />
+    );
+    return (
+      <PalmScreenShell title="Nota" onClose={dismissNoteModal} footer={noteFooter}>
+        {Platform.OS === 'ios' ? (
+          <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding">
+            {noteBody}
+          </KeyboardAvoidingView>
+        ) : (
+          noteBody
+        )}
+      </PalmScreenShell>
+    );
+  }
+
+  if (datePickerVisible) {
+    return (
+      <GoToDateScreen
+        title="Elegir fecha"
+        initialDate={dateISO || defaultDate}
+        reminders={[]}
+        onSelectDate={(d) => setDateISO(d)}
+        onClose={() => setDatePickerVisible(false)}
+      />
+    );
+  }
+
+  if (reminder && detailsPalmPickerVisible) {
+    return (
+      <PalmScreenShell title="Hora" onClose={() => closeDetailsPalmPicker(false)}>
+        <View style={{ padding: 14 }}>{renderPalmTimePickers(
+          () => closeDetailsPalmPicker(true),
+          () => closeDetailsPalmPicker(false)
+        )}</View>
+      </PalmScreenShell>
+    );
+  }
+
+  if (!reminder) {
+    return (
+      <PalmScreenShell title="Nuevo" onClose={onClose}>
+        <View style={{ padding: 14 }}>{renderPalmTimePickers(() => void handleOK(), onClose)}</View>
+      </PalmScreenShell>
+    );
+  }
+
+  const repeatQuickMatch = matchRepeatQuickOption(
+    repeat ?? 'none',
+    repeatInterval,
+    repeatEndDate,
+    repeatWeekdays,
+    dateISO || defaultDate
+  );
+
+  const repeatDisplayLabel =
+    repeat === 'none'
+      ? 'No repetir'
+      : buildRepeatSummary(repeat ?? 'none', repeatInterval, repeatEndDate, repeatWeekdays);
+
+  const detailsFooter = (
+    <View style={[styles.actions, { paddingHorizontal: 14, paddingVertical: 12 }]}>
+      <TouchableOpacity style={styles.btn} onPress={() => void handleOK()}>
+        <Text style={styles.btnText}>OK</Text>
+      </TouchableOpacity>
+      <TouchableOpacity style={styles.btn} onPress={onClose}>
+        <Text style={styles.btnText}>Cancelar</Text>
+      </TouchableOpacity>
+      <TouchableOpacity style={styles.btn} onPress={handleDeletePress} disabled={!onDelete}>
+        <Text style={[styles.btnTextDanger, !onDelete && { opacity: 0.35 }]}>Eliminar…</Text>
+      </TouchableOpacity>
+      <TouchableOpacity
+        style={[styles.btn, { paddingHorizontal: 10, paddingVertical: 6 }]}
+        onPress={openNoteModal}
+        accessibilityRole="button"
+        accessibilityLabel="Nota"
+      >
+        <Image source={notaPng} style={{ width: 20, height: 20 }} resizeMode="contain" />
+      </TouchableOpacity>
+    </View>
+  );
+
+  const detailsScroll = (
+    <ScrollView
+      ref={detailsScrollRef}
+      style={styles.pdScroll}
+      contentContainerStyle={styles.pdBodyPad}
+      keyboardShouldPersistTaps="handled"
+      keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+      automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
+      nestedScrollEnabled={false}
+      onScrollBeginDrag={() => {
+        setAlarmUnitPickerVisible(false);
+        closeCategoryPicker();
+        closeRepeatPicker();
+      }}
+    >
               <View style={styles.pdRow}>
                 <Text style={styles.pdLabel}>Hora:</Text>
-                <View style={styles.pdFieldBox}>
+                <View style={styles.pdFieldCol}>
                   <TouchableOpacity
                     activeOpacity={0.75}
                     onPress={openDetailsPalmPicker}
                     accessibilityRole="button"
                     accessibilityLabel="Hora del evento"
                   >
-                    {!noTime && allDay ? (
-                      <>
-                        <Text style={styles.pdFieldText}>Todo el día</Text>
-                        <Text style={[styles.pdFieldText, { fontSize: fs(11), marginTop: 4, opacity: 0.92 }]}>
-                          {allDayRangeSummary}
-                        </Text>
-                      </>
-                    ) : noTime ? (
-                      <Text style={styles.pdFieldText}>Sin hora</Text>
-                    ) : (
-                      <Text style={styles.pdFieldText}>{editTimeSummary}</Text>
-                    )}
+                    <DottedRoundedOutline color={colors.textSecondary}>
+                      <View style={styles.pdPickerRow}>
+                        <View style={{ flex: 1 }}>
+                          {!noTime && allDay ? (
+                            <>
+                              <Text style={styles.pdFieldText}>Todo el día</Text>
+                              <Text style={[styles.pdFieldText, { fontSize: fs(11), marginTop: 4, opacity: 0.92 }]}>
+                                {allDayRangeSummary}
+                              </Text>
+                            </>
+                          ) : noTime ? (
+                            <Text style={styles.pdFieldText}>Sin hora</Text>
+                          ) : (
+                            <Text style={styles.pdFieldText}>{editTimeSummary}</Text>
+                          )}
+                        </View>
+                      </View>
+                    </DottedRoundedOutline>
                   </TouchableOpacity>
                 </View>
               </View>
 
               <View style={styles.pdRow}>
                 <Text style={styles.pdLabel}>Fecha:</Text>
-                <TouchableOpacity
-                  style={styles.pdFieldBox}
-                  activeOpacity={0.75}
-                  onPress={() => setDatePickerVisible(true)}
-                  accessibilityRole="button"
-                  accessibilityLabel="Elegir fecha del evento"
-                >
-                  <Text style={[styles.pdFieldText, { marginBottom: 0 }]}>
-                    {dateISO ? formatDateFull(dateISO) : '—'}
-                  </Text>
-                </TouchableOpacity>
+                <View style={styles.pdFieldCol}>
+                  <TouchableOpacity
+                    activeOpacity={0.75}
+                    onPress={() => {
+                      setAlarmUnitPickerVisible(false);
+                      closeCategoryPicker();
+                      closeRepeatPicker();
+                      setDatePickerVisible(true);
+                    }}
+                    accessibilityRole="button"
+                    accessibilityLabel="Elegir fecha del evento"
+                  >
+                    <DottedRoundedOutline color={colors.textSecondary}>
+                      <View style={styles.pdPickerRow}>
+                        <Text style={styles.pdFieldTextEmphasis}>
+                          {dateISO ? formatDatePalm(dateISO) : '—'}
+                        </Text>
+                      </View>
+                    </DottedRoundedOutline>
+                  </TouchableOpacity>
+                </View>
               </View>
 
               <View
@@ -1432,213 +2091,311 @@ export function EventDetailsModal({
                   alarmSectionY.current = e.nativeEvent.layout.y;
                 }}
               >
-                <View style={styles.pdCheckboxRow}>
+                <View style={[styles.pdCheckboxRow, { alignItems: 'flex-start' }]}>
                   <Text style={styles.pdLabel}>Alarma:</Text>
-                  <TouchableOpacity
-                    style={[styles.checkbox, alarm && !noTime && styles.checkboxChecked, noTime && { opacity: 0.45 }]}
-                    onPress={() => {
-                      if (!noTime) toggleAlarm();
-                    }}
-                    disabled={noTime}
-                    accessibilityRole="checkbox"
-                    accessibilityState={{ checked: alarm && !noTime, disabled: noTime }}
-                  >
+                  <View style={styles.alarmInlineControls}>
+                    <View style={styles.alarmCheckboxWrap}>
+                      <Checkbox
+                        style={[styles.alarmCheckbox, noTime && { opacity: 0.45 }]}
+                        value={alarm && !noTime}
+                        onValueChange={(checked) => {
+                          if (noTime) return;
+                          if (checked) {
+                            setAlarm(true);
+                            const raw = alarmOffsetStr.trim();
+                            if (!raw || raw === '0') setAlarmOffsetStr('5');
+                          } else {
+                            setAlarm(false);
+                          }
+                        }}
+                        disabled={noTime}
+                        color={colors.daySelectedBg}
+                        accessibilityLabel="Activar alarma"
+                      />
+                    </View>
                     {alarm && !noTime ? (
-                      <Text style={{ color: colors.onAccentBg, fontSize: fs(13) }}>✓</Text>
+                      <View style={styles.alarmFieldsRow}>
+                        <View style={styles.alarmNumberCol}>
+                          <View style={styles.alarmFieldContent}>
+                            <TextInput
+                              style={[styles.pdFieldInput, styles.alarmNumberInput, { textAlign: 'center' }]}
+                              value={alarmOffsetStr}
+                              onChangeText={(v) => setAlarmOffsetStr(onlyDigits(v).slice(0, 4))}
+                              keyboardType="number-pad"
+                              placeholder="0"
+                              placeholderTextColor={colors.placeholder}
+                              accessibilityLabel="Anticipación de la alarma"
+                            />
+                          </View>
+                          {renderUnderline()}
+                        </View>
+                        <View style={[styles.alarmUnitCol, alarmUnitPickerVisible && { zIndex: 30 }]}>
+                          <TouchableOpacity
+                            style={[styles.pdFieldRow, styles.alarmUnitRow]}
+                            onPress={() => {
+                              closeCategoryPicker();
+                              closeRepeatPicker();
+                              setAlarmUnitPickerVisible((v) => !v);
+                            }}
+                            activeOpacity={0.75}
+                            accessibilityRole="button"
+                            accessibilityLabel="Unidad de la alarma"
+                            accessibilityState={{ expanded: alarmUnitPickerVisible }}
+                          >
+                            <Text style={[styles.pdFieldText, { flex: 1 }]} numberOfLines={1}>
+                              {alarmUnitLabel}
+                            </Text>
+                            <Text style={styles.pdFieldChevron}>▼</Text>
+                          </TouchableOpacity>
+                          {renderUnderline()}
+                        {alarmUnitPickerVisible ? (
+                          <View style={styles.alarmUnitMenu}>
+                            {ALARM_UNIT_OPTIONS.map((opt, idx) => (
+                              <TouchableOpacity
+                                key={opt.value}
+                                style={[styles.alarmUnitMenuOption, idx === 0 && { borderTopWidth: 0 }]}
+                                onPress={() => {
+                                  setAlarmUnit(opt.value);
+                                  setAlarmUnitPickerVisible(false);
+                                }}
+                              >
+                                <Text
+                                  style={[
+                                    styles.alarmUnitMenuOptionText,
+                                    alarmUnit === opt.value && { color: colors.daySelectedBg },
+                                  ]}
+                                >
+                                  {opt.label}
+                                </Text>
+                              </TouchableOpacity>
+                            ))}
+                          </View>
+                        ) : null}
+                        </View>
+                      </View>
                     ) : null}
-                  </TouchableOpacity>
-                </View>
-                {alarm && !noTime ? (
-                  <View style={{ marginLeft: 72, marginBottom: 8, flexDirection: 'row', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
-                    <TextInput
-                      style={styles.alarmOffsetInput}
-                      value={alarmOffsetStr}
-                      onChangeText={(v) => setAlarmOffsetStr(onlyDigits(v).slice(0, 4))}
-                      keyboardType="number-pad"
-                      placeholder="0"
-                      placeholderTextColor={colors.placeholder}
-                      accessibilityLabel="Anticipación de la alarma"
-                    />
-                    <TouchableOpacity
-                      style={styles.alarmUnitTrigger}
-                      onPress={() => setAlarmUnitPickerVisible(true)}
-                      accessibilityRole="button"
-                    >
-                      <Text style={styles.alarmUnitTriggerText}>{alarmUnitLabel}</Text>
-                      <Text style={styles.alarmUnitChevron}>▼</Text>
-                    </TouchableOpacity>
                   </View>
-                ) : null}
+                </View>
               </View>
 
               <View style={styles.pdRow}>
+                <Text style={styles.pdLabel}>Ubicación:</Text>
+                <View style={styles.pdFieldCol}>
+                  <TextInput
+                    style={styles.pdFieldInput}
+                    value={location}
+                    onChangeText={setLocation}
+                    placeholderTextColor={colors.placeholder}
+                    accessibilityLabel="Ubicación del evento"
+                  />
+                  {renderUnderline()}
+                </View>
+              </View>
+
+              <View ref={categoryAnchorRef} collapsable={false} style={styles.pdRow}>
+                <Text style={styles.pdLabel}>Categoría:</Text>
+                <View style={styles.pdFieldCol}>
+                  <TouchableOpacity
+                    style={styles.pdFieldRow}
+                    onPress={openCategoryPicker}
+                    activeOpacity={0.75}
+                    accessibilityRole="button"
+                    accessibilityLabel="Categoría del evento"
+                    accessibilityState={{ expanded: categoryPickerVisible }}
+                  >
+                    <View style={styles.categoryFieldRow}>
+                      <CategoryDot color={categoryColor(category, categories)} />
+                      <Text style={[styles.pdFieldText, { flex: 1 }]} numberOfLines={1}>
+                        {categoryDisplayLabel(category)}
+                      </Text>
+                    </View>
+                    <Text style={styles.pdFieldChevron}>▼</Text>
+                  </TouchableOpacity>
+                  {renderUnderline()}
+                </View>
+              </View>
+
+              <View ref={repeatAnchorRef} collapsable={false} style={styles.pdRow}>
                 <Text style={styles.pdLabel}>Repetir:</Text>
-                <TouchableOpacity
-                  style={styles.pdFieldBox}
-                  onPress={() => setRepeatModalVisible(true)}
-                  activeOpacity={0.75}
-                  accessibilityRole="button"
-                  accessibilityLabel="Cambiar repetición"
-                >
-                  <Text style={styles.pdFieldText}>
-                    {repeat === 'none' ? 'No' : buildRepeatSummary(repeat ?? 'none', repeatInterval, repeatEndDate)}
-                  </Text>
-                </TouchableOpacity>
+                <View style={styles.pdFieldCol}>
+                  <TouchableOpacity
+                    style={styles.pdFieldRow}
+                    onPress={openRepeatPicker}
+                    activeOpacity={0.75}
+                    accessibilityRole="button"
+                    accessibilityLabel="Cambiar repetición"
+                    accessibilityState={{ expanded: repeatPickerVisible }}
+                  >
+                    <Text style={[styles.pdFieldText, { flex: 1 }]} numberOfLines={2}>
+                      {repeatDisplayLabel}
+                    </Text>
+                    <Text style={styles.pdFieldChevron}>▼</Text>
+                  </TouchableOpacity>
+                  {renderUnderline()}
+                </View>
               </View>
 
             </ScrollView>
+  );
 
-            <View style={[styles.actions, { marginTop: 4, paddingTop: 12 }]}>
-              <TouchableOpacity style={[styles.btn, styles.btnPrimary]} onPress={() => void handleOK()}>
-                <Text style={[styles.btnText, styles.btnTextPrimary]}>OK</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.btn} onPress={onClose}>
-                <Text style={styles.btnText}>Cancelar</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.btn}
-                onPress={handleDeletePress}
-                disabled={!onDelete}
-              >
-                <Text style={[styles.btnTextDanger, !onDelete && { opacity: 0.35 }]}>Eliminar…</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.btn} onPress={openNoteModal}>
-                <Text style={styles.btnText}>Nota</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </ModalOverlay>
-        ) : (
-        <ModalOverlay style={styles.overlayCenter} insets={insets}>
-          <TouchableOpacity style={styles.newEventBackdrop} activeOpacity={1} onPress={onClose} />
-          <View style={styles.newEventCard}>
-                <View style={[styles.header, { marginBottom: 12 }]}>
-                  <Text style={styles.headerTitle}>Nuevo</Text>
-                </View>
-                {renderPalmTimePickers(() => void handleOK(), onClose)}
-          </View>
-        </ModalOverlay>
-        )}
-      </Modal>
+  return (
+    <View style={{ flex: 1 }}>
+      <PalmScreenShell title="Detalles de la cita" onClose={onClose} footer={detailsFooter}>
+        <View ref={detailsCardRef} collapsable={false} style={{ flex: 1 }}>
+          {Platform.OS === 'ios' ? (
+            <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding" keyboardVerticalOffset={Math.max(insets.top, 12)}>
+              {detailsScroll}
+            </KeyboardAvoidingView>
+          ) : (
+            detailsScroll
+          )}
 
-      <Modal
-        visible={reminder != null && detailsPalmPickerVisible}
-        animationType={MODAL_ANIMATION}
-        transparent
-        onRequestClose={() => closeDetailsPalmPicker(false)}
-      >
-        <ModalOverlay style={styles.overlayCenter} insets={insets}>
-          <TouchableOpacity
-            style={styles.newEventBackdrop}
-            activeOpacity={1}
-            onPress={() => closeDetailsPalmPicker(false)}
-          />
-          <View style={styles.newEventCard}>
-            <View style={[styles.header, { marginBottom: 12 }]}>
-              <Text style={styles.headerTitle}>Hora</Text>
-            </View>
-            {renderPalmTimePickers(
-              () => closeDetailsPalmPicker(true),
-              () => closeDetailsPalmPicker(false)
-            )}
-          </View>
-        </ModalOverlay>
-      </Modal>
-
-      <Modal visible={noteModalVisible} animationType={MODAL_ANIMATION} transparent onRequestClose={dismissNoteModal}>
-        <View style={styles.noteModalRoot}>
-          <TouchableOpacity style={styles.noteModalBackdrop} activeOpacity={1} onPress={dismissNoteModal} />
-          <ModalOverlay avoidKeyboard style={styles.noteModalCenter} insets={insets}>
-            <View style={styles.noteModalCard}>
-              <Text style={styles.noteModalTitle}>Nota</Text>
-              <TextInput
-                style={styles.noteModalInput}
-                value={noteDraft}
-                onChangeText={setNoteDraft}
-                placeholder="Escribe una nota..."
-                placeholderTextColor={colors.placeholder}
-                multiline
-                autoFocus
-              />
-              <View style={styles.noteModalActions}>
-                <TouchableOpacity style={styles.noteModalBtnDanger} onPress={clearNoteFromModal}>
-                  <Text style={styles.btnTextDanger}>Borrar nota</Text>
-                </TouchableOpacity>
-                <View style={styles.noteModalActionsEnd}>
-                  <TouchableOpacity style={styles.noteModalBtn} onPress={dismissNoteModal}>
-                    <Text style={styles.btnText}>Cancelar</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={[styles.noteModalBtn, styles.noteModalBtnPrimary]} onPress={confirmNoteModal}>
-                    <Text style={[styles.btnText, styles.btnTextPrimary]}>Guardar</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            </View>
-          </ModalOverlay>
-        </View>
-      </Modal>
-
-      <Modal
-        visible={alarmUnitPickerVisible}
-        animationType={MODAL_ANIMATION}
-        transparent
-        onRequestClose={() => setAlarmUnitPickerVisible(false)}
-      >
-        <View style={styles.noteModalRoot}>
-          <TouchableOpacity
-            style={styles.noteModalBackdrop}
-            activeOpacity={1}
-            onPress={() => setAlarmUnitPickerVisible(false)}
-          />
-          <View style={styles.noteModalCenter}>
-            <View style={styles.unitPickerCard}>
-              <Text style={styles.unitPickerTitle}>Unidad</Text>
-              {ALARM_UNIT_OPTIONS.map((opt) => (
-                <TouchableOpacity
-                  key={opt.value}
-                  style={styles.unitPickerOption}
-                  onPress={() => {
-                    setAlarmUnit(opt.value);
-                    setAlarmUnitPickerVisible(false);
-                  }}
-                >
-                  <Text
+          {categoryPickerVisible ? (
+                <View style={styles.categoryMenuOverlay} pointerEvents="box-none">
+                  <TouchableOpacity
+                    style={StyleSheet.absoluteFillObject}
+                    activeOpacity={1}
+                    onPress={closeCategoryPicker}
+                  />
+                  <View
                     style={[
-                      styles.unitPickerOptionText,
-                      alarmUnit === opt.value && { color: colors.daySelectedBg },
+                      styles.categoryMenu,
+                      categoryMenuPos
+                        ? {
+                            top: categoryMenuPos.top,
+                            left: categoryMenuPos.left,
+                            width: categoryMenuPos.width,
+                          }
+                        : { top: 120, left: 112, right: 16 },
                     ]}
                   >
-                    {opt.label}
-                  </Text>
-                </TouchableOpacity>
-              ))}
+                    <ScrollView
+                      style={styles.categoryMenuScroll}
+                      nestedScrollEnabled
+                      keyboardShouldPersistTaps="handled"
+                      bounces={false}
+                      showsVerticalScrollIndicator
+                    >
+                      {categories.map((cat, idx) => {
+                        const isSelected = category.trim() === cat.name;
+                        return (
+                          <TouchableOpacity
+                            key={cat.name}
+                            style={[
+                              styles.categoryMenuOption,
+                              idx === 0 && { borderTopWidth: 0 },
+                              isSelected && styles.categoryMenuOptionSelected,
+                            ]}
+                            onPress={() => {
+                              setCategory(cat.name);
+                              closeCategoryPicker();
+                            }}
+                          >
+                            <CategoryDot color={cat.color} />
+                            <Text
+                              style={[
+                                styles.categoryMenuOptionText,
+                                isSelected && styles.categoryMenuOptionTextSelected,
+                              ]}
+                            >
+                              {cat.name}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                      <TouchableOpacity
+                        style={[
+                          styles.categoryMenuOption,
+                          styles.categoryMenuSeparator,
+                          !category.trim() && styles.categoryMenuOptionSelected,
+                        ]}
+                        onPress={() => {
+                          setCategory('');
+                          closeCategoryPicker();
+                        }}
+                      >
+                        <CategoryDot color={UNCategorized_COLOR} />
+                        <Text
+                          style={[
+                            styles.categoryMenuOptionText,
+                            !category.trim() && styles.categoryMenuOptionTextSelected,
+                          ]}
+                        >
+                          {UNCategorized_LABEL}
+                        </Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[styles.categoryMenuOption, styles.categoryMenuSeparator]}
+                        onPress={() => {
+                          closeCategoryPicker();
+                          setEditCategoriesVisible(true);
+                        }}
+                      >
+                        <Text style={styles.categoryMenuOptionText}>{EDIT_CATEGORIES_LABEL}</Text>
+                      </TouchableOpacity>
+                    </ScrollView>
+                  </View>
+                </View>
+              ) : null}
+        </View>
+      </PalmScreenShell>
+
+      {repeatPickerVisible ? (
+        <ScreenOverlay zIndex={500}>
+          <View style={styles.categoryMenuOverlay} pointerEvents="box-none">
+            <TouchableOpacity
+              style={StyleSheet.absoluteFillObject}
+              activeOpacity={1}
+              onPress={closeRepeatPicker}
+            />
+            <View
+              style={[
+                styles.floatingMenu,
+                repeatMenuPos
+                  ? {
+                      top: repeatMenuPos.top,
+                      left: repeatMenuPos.left,
+                      width: repeatMenuPos.width,
+                      maxHeight: repeatMenuPos.maxHeight,
+                    }
+                  : { top: 280, left: 112, right: 16, maxHeight: 280 },
+              ]}
+            >
+              <ScrollView
+                style={[styles.floatingMenuScroll, repeatMenuPos ? { maxHeight: repeatMenuPos.maxHeight } : { maxHeight: 280 }]}
+                nestedScrollEnabled
+                keyboardShouldPersistTaps="handled"
+                bounces={false}
+                showsVerticalScrollIndicator
+              >
+                {REPEAT_QUICK_OPTIONS.map((opt, idx) => {
+                  const isSelected = opt.id !== 'other' && repeatQuickMatch === opt.id;
+                  return (
+                    <TouchableOpacity
+                      key={opt.id}
+                      style={[
+                        styles.categoryMenuOption,
+                        idx === 0 && { borderTopWidth: 0 },
+                        isSelected && styles.categoryMenuOptionSelected,
+                      ]}
+                      onPress={() => applyRepeatQuickOption(opt.id)}
+                    >
+                      <Text
+                        style={[
+                          styles.categoryMenuOptionText,
+                          isSelected && styles.categoryMenuOptionTextSelected,
+                        ]}
+                      >
+                        {opt.label}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
             </View>
           </View>
-        </View>
-      </Modal>
-
-      <GoToDateModal
-        visible={datePickerVisible}
-        title="Elegir fecha"
-        initialDate={dateISO || defaultDate}
-        reminders={[]}
-        onSelectDate={(d) => setDateISO(d)}
-        onClose={() => setDatePickerVisible(false)}
-      />
-
-      <ChangeRepeatModal
-        visible={repeatModalVisible}
-        frequency={repeat ?? 'none'}
-        interval={repeatInterval}
-        endDateISO={repeatEndDate}
-        onApply={(f, int, end) => {
-          setRepeat(f);
-          setRepeatInterval(int);
-          setRepeatEndDate(end);
-          setRepeatModalVisible(false);
-        }}
-        onDismiss={() => setRepeatModalVisible(false)}
-      />
-    </>
+        </ScreenOverlay>
+      ) : null}
+    </View>
   );
 }

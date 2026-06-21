@@ -1,27 +1,41 @@
 /**
- * Modal "Ir a fecha": selector de año, mes y día.
- * Al elegir un día se navega a la vista del día con esa fecha.
+ * Pantalla «Ir a fecha»: selector de año, mes y día (estilo Palm Datebook).
  */
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from "react";
 import {
   View,
   Text,
-  Modal,
   TouchableOpacity,
-  Pressable,
   StyleSheet,
   ScrollView,
-} from 'react-native';
-import { usePreferences } from '../../contexts/PreferencesContext';
-import { getMonthCalendarCells, getTodayISO } from '../../utils/date';
-import { WEEK_DAY_LETTERS } from '../../constants/agenda';
-import { scaledFontSize } from '../../utils/typography';
-import type { Reminder } from '../../types/reminder';
+} from "react-native";
+import { usePreferences } from "../../contexts/PreferencesContext";
+import {
+  getMonthCalendarCellsMondayFirst,
+  getTodayISO,
+} from "../../utils/date";
+import { SINGLE_DAY_LETTERS } from "../../constants/agenda";
+import { scaledFontSize, titleFont } from "../../utils/typography";
+import { PalmScreenShell } from "../PalmScreenShell";
+import type { Reminder } from "../../types/reminder";
 
-const MONTHS = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
-export type GoToDateModalProps = {
-  visible: boolean;
+const MONTHS = [
+  "Ene",
+  "Feb",
+  "Mar",
+  "Abr",
+  "May",
+  "Jun",
+  "Jul",
+  "Ago",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dic",
+];
+
+export type GoToDateScreenProps = {
   /** Título de la cabecera (por defecto «Ir a fecha») */
   title?: string;
   /** Fecha inicial al abrir (ej. fecha actual o seleccionada) */
@@ -30,40 +44,39 @@ export type GoToDateModalProps = {
   reminders?: Reminder[];
   /** Al cambiar de mes en el calendario (para que el padre cargue recordatorios) */
   onMonthChange?: (year: number, month: number) => void;
-  /** Al elegir una fecha: pasa YYYY-MM-DD y cierra el modal */
+  /** Al elegir una fecha: pasa YYYY-MM-DD y cierra */
   onSelectDate: (dateISO: string) => void;
   onClose: () => void;
 };
 
-export function GoToDateModal({
-  visible,
-  title = 'Ir a fecha',
+export function GoToDateScreen({
+  title = "Ir a fecha",
   initialDate,
   reminders = [],
   onMonthChange,
   onSelectDate,
   onClose,
-}: GoToDateModalProps) {
+}: GoToDateScreenProps) {
   const today = getTodayISO();
   const [year, setYear] = useState(() => new Date().getFullYear());
   const [month, setMonth] = useState(() => new Date().getMonth());
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
 
   useEffect(() => {
-    if (visible && initialDate) {
-      const [y, m] = initialDate.split('-').map(Number);
+    if (initialDate) {
+      const [y, m] = initialDate.split("-").map(Number);
       setYear(y);
       setMonth(m - 1);
       setSelectedDay(initialDate);
       onMonthChange?.(y, m - 1);
-    } else if (visible) {
+    } else {
       const d = new Date();
       setYear(d.getFullYear());
       setMonth(d.getMonth());
-      setSelectedDay(today);
+      setSelectedDay(getTodayISO());
       onMonthChange?.(d.getFullYear(), d.getMonth());
     }
-  }, [visible, initialDate]);
+  }, []);
 
   const handleYearChange = (delta: number) => {
     const next = year + delta;
@@ -76,7 +89,7 @@ export function GoToDateModal({
   };
 
   const monthAnchor = new Date(year, month, 1);
-  const cells = getMonthCalendarCells(monthAnchor);
+  const cells = getMonthCalendarCellsMondayFirst(monthAnchor);
   const datesWithEvents = new Set(reminders.map((r) => r.date));
 
   const handleDayPress = (dateISO: string | null) => {
@@ -95,176 +108,204 @@ export function GoToDateModal({
   const styles = useMemo(
     () =>
       StyleSheet.create({
-        backdrop: {
-          flex: 1,
-          backgroundColor: colors.backdrop,
-          justifyContent: 'center',
-          alignItems: 'center',
-          padding: 20,
+        scrollContent: { padding: 10, paddingBottom: 16 },
+        calendarFrame: {
+          backgroundColor: colors.viewScreenBackground,
         },
-        card: {
-          width: '100%',
-          maxWidth: 360,
-          backgroundColor: colors.cardBackground,
-          borderRadius: 0,
-          overflow: 'hidden',
-          paddingBottom: 16,
-        },
-        header: {
-          backgroundColor: colors.palmHeaderBg,
-          paddingVertical: 12,
-          alignItems: 'center',
-        },
-        headerTitle: { fontSize: fs(18), color: colors.palmHeaderText, fontFamily: 'PixelOperator', fontWeight: 'normal' },
         yearRow: {
-          flexDirection: 'row',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: 16,
-          paddingVertical: 12,
+          flexDirection: "row",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 20,
+          paddingVertical: 10,
+          backgroundColor: colors.viewScreenBackground,
         },
         yearArrow: { padding: 4 },
-        yearArrowText: { fontSize: fs(16), color: colors.iconActive, fontFamily: 'PixelOperator', fontWeight: 'normal' },
-        yearText: {
-          fontSize: fs(20),
+        yearArrowText: {
+          fontSize: fs(14),
           color: colors.text,
-          minWidth: 48,
-          textAlign: 'center',
-          fontFamily: 'PixelOperator',
-          fontWeight: 'normal',
+          fontFamily: "PixelOperator",
+          fontWeight: "normal",
+        },
+        yearText: {
+          fontSize: fs(18),
+          color: colors.text,
+          minWidth: 52,
+          textAlign: "center",
+          fontFamily: "PixelOperator",
+          fontWeight: "normal",
         },
         monthGrid: {
-          flexDirection: 'row',
-          flexWrap: 'wrap',
-          justifyContent: 'center',
-          gap: 6,
-          paddingHorizontal: 12,
-          paddingBottom: 12,
+          borderWidth: 1,
+          borderColor: colors.agendaHeaderBorder,
         },
-        monthBtn: {
-          paddingVertical: 8,
-          paddingHorizontal: 12,
-          borderRadius: 0,
-          backgroundColor: colors.barBackground,
-          minWidth: 48,
-          alignItems: 'center',
+        monthRow: {
+          flexDirection: "row",
         },
-        monthBtnSelected: { backgroundColor: colors.daySelectedBg },
-        monthBtnText: { fontSize: fs(13), color: colors.text, fontFamily: 'PixelOperator', fontWeight: 'normal' },
-        monthBtnTextSelected: { color: colors.onAccentBg },
-        dayHeaderRow: {
-          flexDirection: 'row',
-          paddingHorizontal: 8,
-          paddingBottom: 6,
-          paddingTop: 4,
+        monthCell: {
+          flex: 1,
+          paddingVertical: 7,
+          alignItems: "center",
+          justifyContent: "center",
+          borderRightWidth: 1,
           borderBottomWidth: 1,
-          borderColor: colors.line,
-          marginHorizontal: 12,
-          minHeight: Math.round(fs(9) * 2.4),
+          borderColor: colors.agendaHeaderBorder,
+          backgroundColor: colors.viewScreenBackground,
         },
-        dayHeaderCell: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 1 },
+        monthCellLast: { borderRightWidth: 0 },
+        monthCellLastRow: { borderBottomWidth: 0 },
+        monthCellSelected: { backgroundColor: colors.agendaHeaderSelectedBg },
+        monthCellText: {
+          fontSize: fs(13),
+          color: colors.text,
+          fontFamily: "PixelOperator",
+          fontWeight: "normal",
+        },
+        monthCellTextSelected: { color: colors.agendaHeaderSelectedText },
+        dayHeaderRow: {
+          flexDirection: "row",
+          marginTop: 10,
+          backgroundColor: colors.viewScreenBackground,
+        },
+        dayHeaderCell: {
+          flex: 1,
+          alignItems: "center",
+          justifyContent: "center",
+          paddingVertical: 4,
+        },
         dayHeaderText: {
-          fontSize: fs(9),
-          lineHeight: Math.round(fs(9) * 1.2),
-          color: colors.textSecondary,
-          fontFamily: 'PixelOperator',
-          fontWeight: 'normal',
-          textAlign: 'center',
+          fontSize: fs(13),
+          color: colors.text,
+          ...titleFont,
+          textAlign: "center",
         },
-        calendarGrid: { paddingHorizontal: 8, paddingTop: 8, marginHorizontal: 12 },
-        calendarRow: { flexDirection: 'row', marginBottom: 4 },
+        calendarGrid: {
+          paddingVertical: 6,
+          paddingHorizontal: 2,
+          backgroundColor: colors.viewScreenBackground,
+        },
+        calendarRow: { flexDirection: "row", marginBottom: 2 },
         dayCell: {
           flex: 1,
           aspectRatio: 1,
           maxHeight: 40,
-          alignItems: 'center',
-          justifyContent: 'center',
-          borderRadius: 0,
-          marginHorizontal: 2,
+          alignItems: "center",
+          justifyContent: "center",
         },
-        dayCellOther: { opacity: 0.35 },
-        dayCellToday: {
-          backgroundColor: colors.todayCellBg,
-          borderWidth: 1,
-          borderColor: colors.reminderAlt1,
+        dayCellSelected: { backgroundColor: colors.agendaHeaderSelectedBg },
+        dayCellText: {
+          fontSize: fs(14),
+          color: colors.text,
+          fontFamily: "PixelOperator",
+          fontWeight: "normal",
         },
-        dayCellSelected: { backgroundColor: colors.daySelectedBg },
-        dayCellText: { fontSize: fs(14), color: colors.text, fontFamily: 'PixelOperator', fontWeight: 'normal' },
-        dayCellTextOther: { color: colors.textSecondary },
-        dayCellTextSelected: { color: colors.onAccentBg },
+        dayCellTextSelected: { color: colors.agendaHeaderSelectedText },
         dayDot: {
-          position: 'absolute',
-          bottom: 2,
+          position: "absolute",
+          bottom: 4,
           width: 4,
           height: 4,
-          borderRadius: 0,
+          borderRadius: 2,
           backgroundColor: colors.reminderDefault,
         },
         actions: {
-          flexDirection: 'row',
-          justifyContent: 'space-between',
-          paddingHorizontal: 16,
-          paddingTop: 16,
+          flexDirection: "row",
+          justifyContent: "space-between",
+          paddingHorizontal: 14,
+          paddingTop: 12,
           gap: 12,
         },
-        btnCancel: {
+        footerBtn: {
           flex: 1,
-          paddingVertical: 12,
-          borderRadius: 0,
-          backgroundColor: colors.barBackground,
-          alignItems: 'center',
+          paddingVertical: 10,
+          borderRadius: 10,
+          borderWidth: 1,
+          borderColor: colors.footerText,
+          backgroundColor: colors.viewScreenBackground,
+          alignItems: "center",
         },
-        btnCancelText: { fontSize: fs(15), color: colors.text, fontFamily: 'PixelOperator', fontWeight: 'normal' },
-        btnHoy: {
-          flex: 1,
-          paddingVertical: 12,
-          borderRadius: 0,
-          backgroundColor: colors.daySelectedBg,
-          alignItems: 'center',
+        footerBtnText: {
+          fontSize: fs(15),
+          color: colors.footerText,
+          fontFamily: "PixelOperator",
+          fontWeight: "normal",
         },
-        btnHoyText: { fontSize: fs(15), color: colors.onAccentBg, fontFamily: 'PixelOperator', fontWeight: 'normal' },
       }),
-    [colors, fontScale]
+    [colors, fontScale],
   );
 
-  if (!visible) return null;
+  const footer = (
+    <View style={styles.actions}>
+      <TouchableOpacity style={styles.footerBtn} onPress={onClose}>
+        <Text style={styles.footerBtnText}>Cancelar</Text>
+      </TouchableOpacity>
+      <TouchableOpacity style={styles.footerBtn} onPress={handleHoy}>
+        <Text style={styles.footerBtnText}>Hoy</Text>
+      </TouchableOpacity>
+    </View>
+  );
 
   return (
-    <Modal visible={visible} transparent animationType="fade">
-      <Pressable style={styles.backdrop} onPress={onClose}>
-        <Pressable style={styles.card} onPress={(e) => e.stopPropagation()}>
-          <View style={styles.header}>
-            <Text style={styles.headerTitle}>{title}</Text>
-          </View>
-
+    <PalmScreenShell title={title} onClose={onClose} footer={footer}>
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+      >
+        <View style={styles.calendarFrame}>
           <View style={styles.yearRow}>
-            <TouchableOpacity onPress={() => handleYearChange(-1)} style={styles.yearArrow} hitSlop={8}>
-              <Text style={styles.yearArrowText}>{'◀'}</Text>
+            <TouchableOpacity
+              onPress={() => handleYearChange(-1)}
+              style={styles.yearArrow}
+              hitSlop={8}
+            >
+              <Text style={styles.yearArrowText}>{"◀"}</Text>
             </TouchableOpacity>
             <Text style={styles.yearText}>{year}</Text>
-            <TouchableOpacity onPress={() => handleYearChange(1)} style={styles.yearArrow} hitSlop={8}>
-              <Text style={styles.yearArrowText}>{'▶'}</Text>
+            <TouchableOpacity
+              onPress={() => handleYearChange(1)}
+              style={styles.yearArrow}
+              hitSlop={8}
+            >
+              <Text style={styles.yearArrowText}>{"▶"}</Text>
             </TouchableOpacity>
           </View>
 
           <View style={styles.monthGrid}>
-            {MONTHS.map((label, i) => (
-              <TouchableOpacity
-                key={i}
-                style={[styles.monthBtn, i === month && styles.monthBtnSelected]}
-                onPress={() => handleMonthChange(i)}
-              >
-                <Text style={[styles.monthBtnText, i === month && styles.monthBtnTextSelected]}>{label}</Text>
-              </TouchableOpacity>
+            {[0, 1].map((row) => (
+              <View key={row} style={styles.monthRow}>
+                {MONTHS.slice(row * 6, row * 6 + 6).map((label, col) => {
+                  const i = row * 6 + col;
+                  const selected = i === month;
+                  return (
+                    <TouchableOpacity
+                      key={i}
+                      style={[
+                        styles.monthCell,
+                        col === 5 && styles.monthCellLast,
+                        row === 1 && styles.monthCellLastRow,
+                        selected && styles.monthCellSelected,
+                      ]}
+                      onPress={() => handleMonthChange(i)}
+                    >
+                      <Text
+                        style={[
+                          styles.monthCellText,
+                          selected && styles.monthCellTextSelected,
+                        ]}
+                      >
+                        {label}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
             ))}
           </View>
 
           <View style={styles.dayHeaderRow}>
-            {WEEK_DAY_LETTERS.map((dayName, i) => (
+            {SINGLE_DAY_LETTERS.map((dayName, i) => (
               <View key={i} style={styles.dayHeaderCell}>
-                <Text style={styles.dayHeaderText} numberOfLines={2}>
-                  {dayName}
-                </Text>
+                <Text style={styles.dayHeaderText}>{dayName}</Text>
               </View>
             ))}
           </View>
@@ -274,17 +315,15 @@ export function GoToDateModal({
               <View key={row} style={styles.calendarRow}>
                 {cells.slice(row * 7, (row + 1) * 7).map((dateISO, col) => {
                   const isCurrentMonth = dateISO !== null;
-                  const isToday = dateISO === today;
                   const isSelected = dateISO === selectedDay;
-                  const hasEvents = dateISO !== null && datesWithEvents.has(dateISO);
+                  const hasEvents =
+                    dateISO !== null && datesWithEvents.has(dateISO);
                   const index = row * 7 + col;
                   return (
                     <TouchableOpacity
                       key={index}
                       style={[
                         styles.dayCell,
-                        !isCurrentMonth && styles.dayCellOther,
-                        isToday && styles.dayCellToday,
                         isSelected && styles.dayCellSelected,
                       ]}
                       onPress={() => {
@@ -298,7 +337,6 @@ export function GoToDateModal({
                           <Text
                             style={[
                               styles.dayCellText,
-                              !isCurrentMonth && styles.dayCellTextOther,
                               isSelected && styles.dayCellTextSelected,
                             ]}
                           >
@@ -313,17 +351,18 @@ export function GoToDateModal({
               </View>
             ))}
           </View>
-
-          <View style={styles.actions}>
-            <TouchableOpacity style={styles.btnCancel} onPress={onClose}>
-              <Text style={styles.btnCancelText}>Cancelar</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.btnHoy} onPress={handleHoy}>
-              <Text style={styles.btnHoyText}>Hoy</Text>
-            </TouchableOpacity>
-          </View>
-        </Pressable>
-      </Pressable>
-    </Modal>
+        </View>
+      </ScrollView>
+    </PalmScreenShell>
   );
+}
+
+/** @deprecated Usar GoToDateScreen */
+export type GoToDateModalProps = GoToDateScreenProps & { visible?: boolean };
+
+/** @deprecated Usar GoToDateScreen con ScreenOverlay en el padre */
+export function GoToDateModal(props: GoToDateModalProps) {
+  const { visible = true, ...rest } = props;
+  if (!visible) return null;
+  return <GoToDateScreen {...rest} />;
 }

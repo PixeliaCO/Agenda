@@ -87,6 +87,7 @@ function makeNativeModule(packageName) {
   return `package ${packageName}
 
 import android.content.Context
+import android.content.Intent
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
@@ -104,6 +105,19 @@ class AgendaAlarmNativeModule(reactContext: ReactApplicationContext) :
       .putString("payload_" + notificationId, payloadJson)
       .putString("payload_current_id", notificationId)
       .apply()
+  }
+
+  /** Fallback cuando el sistema bloquea fullScreenIntent (p. ej. sin permiso FSI en API 34+). */
+  @ReactMethod
+  fun launchLockScreenActivity() {
+    val ctx = reactApplicationContext
+    val intent = Intent(ctx, AlarmLockscreenActivity::class.java)
+    intent.addFlags(
+      Intent.FLAG_ACTIVITY_NEW_TASK or
+        Intent.FLAG_ACTIVITY_CLEAR_TOP or
+        Intent.FLAG_ACTIVITY_SINGLE_TOP
+    )
+    ctx.startActivity(intent)
   }
 }
 `;
@@ -144,9 +158,27 @@ import android.view.WindowManager
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
+import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
+import android.view.View
+import android.widget.ScrollView
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import org.json.JSONObject
 
 class AlarmLockscreenActivity : Activity() {
+
+  private val cHeader = 0xFF1332F6.toInt()
+  private val cHeaderText = 0xFFFFFFFF.toInt()
+  private val cScreen = 0xFFFFFFFF.toInt()
+  private val cText = 0xFF152238.toInt()
+  private val cTextSec = 0xFF4A5F78.toInt()
+  private val cHint = 0xFF6B7F95.toInt()
+  private val cLine = 0xFFC5D4E6.toInt()
+  private val cStrongBorder = 0xFF243B53.toInt()
+  private val cFooterBg = 0xFFC3C3C3.toInt()
+  private val cFooterText = 0xFF1A1A1A.toInt()
+  private val cFooterStroke = 0xFF888888.toInt()
 
   private var touchDownY = 0f
   private val swipeThresholdPx by lazy { 120f * resources.displayMetrics.density }
@@ -181,11 +213,18 @@ class AlarmLockscreenActivity : Activity() {
     val titleSnapshot = payload.optString("titleSnapshot", "Evento")
     val startTimeSnapshot = payload.optString("startTimeSnapshot", "09:00")
     val dateSnapshot = payload.optString("dateSnapshot", "2000-01-01")
+    val snoozeMinutes = payload.optInt("snoozeMinutes", 5).coerceIn(1, 120)
+    val snoozeLabel = "Recordar en " + snoozeMinutes + " min"
+    val timeChip = formatTimeChip(startTimeSnapshot)
+    val dateChip = formatDateChip(dateSnapshot)
 
     val root = LinearLayout(this).apply {
       orientation = LinearLayout.VERTICAL
-      setBackgroundColor(0xFF111111.toInt())
-      setPadding(dp(24), dp(48), dp(24), dp(24))
+      setBackgroundColor(cScreen)
+      layoutParams = LinearLayout.LayoutParams(
+        LinearLayout.LayoutParams.MATCH_PARENT,
+        LinearLayout.LayoutParams.MATCH_PARENT,
+      )
       setOnTouchListener { _, ev ->
         when (ev.action) {
           MotionEvent.ACTION_DOWN -> touchDownY = ev.y
@@ -208,77 +247,171 @@ class AlarmLockscreenActivity : Activity() {
       }
     }
 
-    root.addView(
+    val header = LinearLayout(this).apply {
+      orientation = LinearLayout.VERTICAL
+      setBackgroundColor(cHeader)
+      setPadding(dp(16), dp(44), dp(16), dp(14))
+    }
+    header.addView(
+      TextView(this).apply {
+        text = "Alarma"
+        textSize = 12f
+        setTextColor(cHeaderText)
+        alpha = 0.88f
+        letterSpacing = 0.06f
+        typeface = Typeface.DEFAULT_BOLD
+        gravity = Gravity.CENTER_HORIZONTAL
+      },
+      LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT),
+    )
+    header.addView(
       TextView(this).apply {
         text = title
-        textSize = 22f
-        setTextColor(0xFFFFFFFF.toInt())
+        textSize = 19f
+        setTextColor(cHeaderText)
+        typeface = Typeface.DEFAULT_BOLD
         gravity = Gravity.CENTER_HORIZONTAL
+        setPadding(0, dp(4), 0, 0)
       },
       LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT),
     )
     root.addView(
+      header,
+      LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT),
+    )
+
+    root.addView(
+      View(this).apply { setBackgroundColor(cHeader) },
+      LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(3)),
+    )
+
+    val scroll = ScrollView(this).apply {
+      isFillViewport = true
+      setBackgroundColor(cScreen)
+    }
+    val scrollInner = LinearLayout(this).apply {
+      orientation = LinearLayout.VERTICAL
+      setPadding(dp(16), dp(20), dp(16), dp(12))
+      gravity = Gravity.CENTER_HORIZONTAL
+    }
+
+    val card = LinearLayout(this).apply {
+      orientation = LinearLayout.VERTICAL
+      setPadding(dp(18), dp(18), dp(18), dp(18))
+      background = GradientDrawable().apply {
+        setColor(cScreen)
+        setStroke(dp(2), cStrongBorder)
+        cornerRadius = 0f
+      }
+    }
+    card.addView(
       TextView(this).apply {
         text = body
-        textSize = 16f
-        setTextColor(0xFFCCCCCC.toInt())
+        textSize = 15f
+        setTextColor(cTextSec)
         gravity = Gravity.CENTER_HORIZONTAL
-      },
-      LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT),
-    )
-    root.addView(
-      TextView(this).apply {
-        text = "Desliza hacia arriba para detener"
-        textSize = 14f
-        setTextColor(0xFF888888.toInt())
-        gravity = Gravity.CENTER_HORIZONTAL
-        setPadding(0, dp(24), 0, dp(8))
+        setLineSpacing(dp(2).toFloat(), 1f)
       },
       LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT),
     )
 
-    val lpBtn = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-    lpBtn.topMargin = dp(32)
-    root.addView(
-      Button(this).apply {
-        text = "Posponer 5 minutos"
-        setOnClickListener {
-          deliverBridge(
-            "POSPONER",
-            reminderId,
-            alarmKind,
-            notificationId,
-            titleSnapshot,
-            startTimeSnapshot,
-            dateSnapshot,
-          )
-        }
+    val chipRow = LinearLayout(this).apply {
+      orientation = LinearLayout.HORIZONTAL
+      gravity = Gravity.CENTER_HORIZONTAL
+      setPadding(0, dp(16), 0, dp(4))
+    }
+    chipRow.addView(makeChip(timeChip), LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+    chipRow.addView(
+      View(this).apply { /* spacer */ },
+      LinearLayout.LayoutParams(dp(8), 1),
+    )
+    chipRow.addView(makeChip(dateChip), LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+    card.addView(
+      chipRow,
+      LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT),
+    )
+
+    card.addView(
+      View(this).apply { setBackgroundColor(cLine) },
+      LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(1)).apply {
+        topMargin = dp(12)
+        bottomMargin = dp(12)
       },
-      lpBtn,
+    )
+
+    card.addView(
+      TextView(this).apply {
+        text = "↑  Desliza hacia arriba para completar"
+        textSize = 13f
+        setTextColor(cHint)
+        gravity = Gravity.CENTER_HORIZONTAL
+        typeface = Typeface.DEFAULT_BOLD
+      },
+      LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT),
+    )
+
+    scrollInner.addView(
+      card,
+      LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT),
+    )
+    scroll.addView(
+      scrollInner,
+      LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT),
     )
     root.addView(
-      TextView(this).apply {
-        text = "Eliminar evento"
-        textSize = 14f
-        setTextColor(0xFFFF6666.toInt())
-        gravity = Gravity.CENTER_HORIZONTAL
-        setPadding(0, dp(16), 0, 0)
-        setOnClickListener {
-          deliverBridge(
-            "ELIMINAR",
-            reminderId,
-            alarmKind,
-            notificationId,
-            titleSnapshot,
-            startTimeSnapshot,
-            dateSnapshot,
-          )
-        }
+      scroll,
+      LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f),
+    )
+
+    val footer = LinearLayout(this).apply {
+      orientation = LinearLayout.VERTICAL
+      setBackgroundColor(cFooterBg)
+      setPadding(dp(12), dp(12), dp(12), dp(20))
+    }
+    footer.addView(
+      View(this).apply { setBackgroundColor(cFooterStroke) },
+      LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(1)),
+    )
+
+    val actionRow = LinearLayout(this).apply {
+      orientation = LinearLayout.HORIZONTAL
+      setPadding(0, dp(10), 0, 0)
+    }
+    val halfLp = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+    val snoozeBtn = palmRetroButton(snoozeLabel, cFooterBg, cFooterText)
+    snoozeBtn.setOnClickListener {
+      deliverBridge("POSPONER", reminderId, alarmKind, notificationId, titleSnapshot, startTimeSnapshot, dateSnapshot)
+    }
+    actionRow.addView(snoozeBtn, halfLp.apply { marginEnd = dp(6) })
+    val reproBtn = palmRetroButton("Reprogramar", cFooterBg, cFooterText)
+    reproBtn.setOnClickListener {
+      deliverBridge("REPROGRAMAR", reminderId, alarmKind, notificationId, titleSnapshot, startTimeSnapshot, dateSnapshot)
+    }
+    actionRow.addView(reproBtn, halfLp.apply { marginStart = dp(6) })
+    footer.addView(actionRow, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+
+    val doneBtn = palmRetroButton("Completado", cHeader, cHeaderText, cHeader)
+    doneBtn.setOnClickListener {
+      deliverBridge("OK", reminderId, alarmKind, notificationId, titleSnapshot, startTimeSnapshot, dateSnapshot)
+    }
+    footer.addView(
+      doneBtn,
+      LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+        topMargin = dp(10)
       },
+    )
+
+    root.addView(
+      footer,
       LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT),
     )
 
     setContentView(root)
+    ViewCompat.setOnApplyWindowInsetsListener(root) { _, insets ->
+      val nav = insets.getInsets(WindowInsetsCompat.Type.navigationBars())
+      footer.setPadding(dp(12), dp(12), dp(12), dp(20) + nav.bottom)
+      insets
+    }
   }
 
   override fun onDestroy() {
@@ -293,6 +426,74 @@ class AlarmLockscreenActivity : Activity() {
   }
 
   private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
+
+  private fun palmRetroButton(
+    label: String,
+    fillColor: Int,
+    textColor: Int,
+    strokeColor: Int = cFooterStroke,
+  ): Button {
+    return Button(this).apply {
+      text = label
+      setTextColor(textColor)
+      textSize = 14f
+      isAllCaps = false
+      typeface = Typeface.DEFAULT_BOLD
+      stateListAnimator = null
+      elevation = 0f
+      background = GradientDrawable().apply {
+        shape = GradientDrawable.RECTANGLE
+        setColor(fillColor)
+        setStroke(dp(1), strokeColor)
+        cornerRadius = dp(3).toFloat()
+      }
+      setPadding(dp(10), dp(11), dp(10), dp(11))
+    }
+  }
+
+  private fun makeChip(label: String): TextView {
+    return TextView(this).apply {
+      text = label
+      textSize = 13f
+      setTextColor(cHeaderText)
+      typeface = Typeface.DEFAULT_BOLD
+      setPadding(dp(12), dp(6), dp(12), dp(6))
+      background = GradientDrawable().apply {
+        setColor(cHeader)
+        cornerRadius = dp(2).toFloat()
+      }
+    }
+  }
+
+  private fun formatTimeChip(hhmm: String): String {
+    return try {
+      val p = hhmm.split(":")
+      if (p.size < 2) return hhmm
+      var h = p[0].toInt()
+      val m = p[1].toInt()
+      val pm = h >= 12
+      if (h == 0) h = 12 else if (h > 12) h -= 12
+      String.format("%d:%02d %s", h, m, if (pm) "p. m." else "a. m.")
+    } catch (_: Exception) {
+      hhmm
+    }
+  }
+
+  private fun formatDateChip(iso: String): String {
+    return try {
+      val p = iso.split("-")
+      if (p.size != 3) return iso
+      val months = arrayOf(
+        "", "Ene", "Feb", "Mar", "Abr", "May", "Jun",
+        "Jul", "Ago", "Sep", "Oct", "Nov", "Dic",
+      )
+      val m = p[1].toInt()
+      val name = if (m in 1..12) months[m] else p[1]
+      p[2].toInt().toString() + " " + name
+    } catch (_: Exception) {
+      iso
+    }
+  }
 
   private fun loadPayloadJson(): JSONObject {
     val prefs = getSharedPreferences("AgendaAlarmPrefs", Context.MODE_PRIVATE)

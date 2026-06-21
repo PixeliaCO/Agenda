@@ -152,6 +152,15 @@ export function formatTimeDisplay(time24: string, use24h: boolean): string {
 
 const WEEKDAY_SHORT = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
 
+/** Fecha compacta estilo Palm: "Jue 8/1/26" */
+export function formatDatePalm(dateISO: string): string {
+  const d = new Date(dateISO + 'T12:00:00');
+  const [y, m, day] = dateISO.split('-').map(Number);
+  const weekday = WEEKDAY_SHORT[d.getDay()];
+  const yearShort = String(y).slice(-2);
+  return `${weekday} ${day}/${m}/${yearShort}`;
+}
+
 /** Fecha con día de la semana para resumen: "Dom, 8 Mar" */
 export function formatDateWithWeekday(dateISO: string): string {
   const d = new Date(dateISO + 'T12:00:00');
@@ -187,6 +196,11 @@ export function formatMonthYearLong(date: Date): string {
   return `${MONTHS_LONG[date.getMonth()]} ${date.getFullYear()}`;
 }
 
+/** Formatea mes y año para recuadro azul Palm: "Jun 26" */
+export function formatMonthYearChip(date: Date): string {
+  return `${MONTHS_SHORT[date.getMonth()]} ${String(date.getFullYear()).slice(-2)}`;
+}
+
 const WEEKDAY_LONG = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
 
 /** Fecha completa para detalles: "Viernes, 13 de marzo de 2026" */
@@ -198,21 +212,31 @@ export function formatDateFull(dateISO: string): string {
   return `${weekday}, ${day} de ${month} de ${y}`;
 }
 
-/**
- * Celdas del calendario mensual (6 semanas × 7 días, domingo primero).
- * Cada elemento es YYYY-MM-DD o null para celdas vacías (días del mes anterior/siguiente o relleno).
- */
-export function getMonthCalendarCells(monthAnchor: Date): (string | null)[] {
+function buildMonthCalendarCells(monthAnchor: Date, weekStartsOn: 'sunday' | 'monday'): (string | null)[] {
   const year = monthAnchor.getFullYear();
   const month = monthAnchor.getMonth();
   const first = new Date(year, month, 1);
-  const firstDayOfWeek = first.getDay();
+  const jsDay = first.getDay();
+  const leadingEmpty = weekStartsOn === 'monday' ? (jsDay === 0 ? 6 : jsDay - 1) : jsDay;
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const cells: (string | null)[] = [];
-  for (let i = 0; i < firstDayOfWeek; i++) cells.push(null);
+  for (let i = 0; i < leadingEmpty; i++) cells.push(null);
   for (let d = 1; d <= daysInMonth; d++) {
     cells.push(year + '-' + pad2(month + 1) + '-' + pad2(d));
   }
   while (cells.length < 42) cells.push(null);
   return cells.slice(0, 42);
+}
+
+/**
+ * Celdas del calendario mensual (6 semanas × 7 días, domingo primero).
+ * Cada elemento es YYYY-MM-DD o null para celdas vacías (días del mes anterior/siguiente o relleno).
+ */
+export function getMonthCalendarCells(monthAnchor: Date): (string | null)[] {
+  return buildMonthCalendarCells(monthAnchor, 'sunday');
+}
+
+/** Celdas del calendario mensual (6 semanas × 7 días, lunes primero — selector Palm). */
+export function getMonthCalendarCellsMondayFirst(monthAnchor: Date): (string | null)[] {
+  return buildMonthCalendarCells(monthAnchor, 'monday');
 }

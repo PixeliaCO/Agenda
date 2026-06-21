@@ -2,20 +2,13 @@
  * Vista resumen del día: lista cronológica de eventos (hora + título).
  */
 
-import React, { useMemo, useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Pressable, ScrollView } from 'react-native';
+import React, { useMemo } from 'react';
+import { View, Text, StyleSheet, Pressable, ScrollView } from 'react-native';
 import { usePreferences } from '../../contexts/PreferencesContext';
-import { formatTime12hShort, formatDateWithWeekday, formatTime12h } from '../../utils/date';
-import { scaledFontSize } from '../../utils/typography';
+import { formatTime12hShort } from '../../utils/date';
+import { scaledFontSize, titleFont } from '../../utils/typography';
 import type { Reminder } from '../../types/reminder';
 import { EventTitleWithIcons } from '../EventTitleWithIcons';
-
-function nowToTime24(): string {
-  const d = new Date();
-  const h = d.getHours();
-  const m = d.getMinutes();
-  return `${h < 10 ? '0' + h : h}:${m < 10 ? '0' + m : m}`;
-}
 
 function timeToMinutes(time: string): number {
   const [h, m] = time.split(':').map(Number);
@@ -23,27 +16,12 @@ function timeToMinutes(time: string): number {
 }
 
 export type DaySummaryViewProps = {
-  dateISO: string;
   reminders: Reminder[];
-  onPreviousDay: () => void;
-  onNextDay: () => void;
   onReminderPress?: (reminder: Reminder) => void;
 };
 
-export function DaySummaryView({
-  dateISO,
-  reminders,
-  onPreviousDay,
-  onNextDay,
-  onReminderPress,
-}: DaySummaryViewProps) {
+export function DaySummaryView({ reminders, onReminderPress }: DaySummaryViewProps) {
   const { colors, fontScale } = usePreferences();
-  const [now, setNow] = useState(() => nowToTime24());
-  useEffect(() => {
-    const id = setInterval(() => setNow(nowToTime24()), 60000);
-    return () => clearInterval(id);
-  }, []);
-  const currentTimeStr = formatTime12h(now);
 
   const sorted = useMemo(
     () =>
@@ -57,79 +35,37 @@ export function DaySummaryView({
   );
 
   const fs = (n: number) => scaledFontSize(n, fontScale);
-  const pad = 10 + Math.round((fontScale - 1) * 4);
-  const arrowMin = 40;
   const styles = useMemo(
     () =>
       StyleSheet.create({
         container: { flex: 1, backgroundColor: colors.screenBackground },
-        header: {
-          flexDirection: 'row',
-          alignItems: 'center',
-          paddingHorizontal: 12,
-          paddingVertical: pad,
-          borderBottomWidth: 1,
-          borderColor: colors.line,
-          backgroundColor: colors.barBackground,
-          minHeight: 48,
-        },
-        currentTime: {
-          fontSize: fs(13),
-          color: colors.iconActive,
-          maxWidth: '28%',
-          fontFamily: 'PixelOperator',
-          fontWeight: 'normal',
-        },
-        dateNav: {
-          flex: 1,
-          flexDirection: 'row',
-          alignItems: 'center',
-          minWidth: 0,
-          gap: 6,
-        },
-        arrow: {
-          minWidth: arrowMin,
-          minHeight: arrowMin,
-          alignItems: 'center',
-          justifyContent: 'center',
-          padding: 6,
-        },
-        arrowText: { fontSize: fs(20), color: colors.iconActive, fontFamily: 'PixelOperator', fontWeight: 'normal' },
-        dateLabel: {
-          flex: 1,
-          fontSize: fs(15),
-          color: colors.text,
-          minWidth: 0,
-          textAlign: 'center',
-          fontFamily: 'PixelOperator',
-          fontWeight: 'normal',
-        },
         scroll: { flex: 1 },
-        scrollContent: { paddingVertical: 10, paddingHorizontal: 18, paddingBottom: 28 },
+        scrollContent: { paddingVertical: 4, paddingHorizontal: 0, paddingBottom: 28 },
         row: {
           flexDirection: 'row',
           alignItems: 'center',
-          paddingVertical: 12 + Math.round((fontScale - 1) * 4),
-          paddingHorizontal: 8,
+          paddingVertical: 10 + Math.round((fontScale - 1) * 4),
+          paddingHorizontal: 12,
           borderBottomWidth: StyleSheet.hairlineWidth,
           borderColor: colors.line,
           gap: 14,
         },
         rowPressed: { backgroundColor: colors.pressedBg },
         time: {
-          fontSize: fs(15),
-          color: colors.text,
+          fontSize: fs(13),
+          color: colors.textSecondary,
           minWidth: Math.max(44, Math.round(44 * fontScale)),
           fontFamily: 'PixelOperator',
           fontWeight: 'normal',
         },
-        title: { fontSize: fs(16), color: colors.text, fontFamily: 'PixelOperator', fontWeight: 'normal' },
+        title: { fontSize: fs(14), color: colors.text, ...titleFont },
         titleWrap: { flex: 1, minWidth: 0 },
         empty: {
-          fontSize: fs(15),
+          fontSize: fs(14),
           color: colors.textSecondary,
           textAlign: 'center',
           marginTop: 24,
+          paddingHorizontal: 18,
           fontFamily: 'PixelOperator',
           fontWeight: 'normal',
         },
@@ -139,23 +75,6 @@ export function DaySummaryView({
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.currentTime} numberOfLines={1} ellipsizeMode="tail">
-          {currentTimeStr}
-        </Text>
-        <View style={styles.dateNav}>
-          <TouchableOpacity onPress={onPreviousDay} style={styles.arrow} hitSlop={8}>
-            <Text style={styles.arrowText}>{'<'}</Text>
-          </TouchableOpacity>
-          <Text style={styles.dateLabel} numberOfLines={1} ellipsizeMode="tail">
-            {formatDateWithWeekday(dateISO)}
-          </Text>
-          <TouchableOpacity onPress={onNextDay} style={styles.arrow} hitSlop={8}>
-            <Text style={styles.arrowText}>{'>'}</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-
       <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
         {sorted.length === 0 ? (
           <Text style={styles.empty}>Sin eventos para este día</Text>
@@ -179,7 +98,7 @@ export function DaySummaryView({
                   showAlarm={Boolean(r.alarm && !r.noTime)}
                   showNote={Boolean(r.note?.trim())}
                   textStyle={styles.title}
-                  iconSize={Math.max(18, Math.round(fs(16) * 1.2))}
+                  iconSize={Math.max(18, Math.round(fs(14) * 1.2))}
                   numberOfLines={1}
                 />
               </View>
