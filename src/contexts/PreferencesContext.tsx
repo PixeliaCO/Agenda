@@ -18,11 +18,11 @@ export type Preferences = {
 const DEFAULT_PREFERENCES: Preferences = {
   fontSize: 'normal',
   darkMode: false,
-  scheduleStartHour: 8,
-  scheduleEndHour: 18,
+  scheduleStartHour: 6,
+  scheduleEndHour: 22,
 };
 
-const STORAGE_KEY = 'agenda_preferences_v1';
+const STORAGE_KEY = 'agenda_preferences_v2';
 
 function safeParseJson<T>(raw: string | null): T | null {
   if (!raw) return null;

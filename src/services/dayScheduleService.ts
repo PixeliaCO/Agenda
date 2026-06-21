@@ -35,8 +35,8 @@ async function hydrateOnce(): Promise<void> {
     store.clear();
     for (const [dateISO, sched] of Object.entries(obj)) {
       if (!sched) continue;
-      const startHour = typeof sched.startHour === 'number' ? sched.startHour : 8;
-      const endHour = typeof sched.endHour === 'number' ? sched.endHour : 18;
+      const startHour = typeof sched.startHour === 'number' ? sched.startHour : 6;
+      const endHour = typeof sched.endHour === 'number' ? sched.endHour : 22;
       store.set(dateISO, { startHour, endHour });
     }
     hydrated = true;

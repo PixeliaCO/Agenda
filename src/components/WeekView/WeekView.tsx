@@ -1,6 +1,6 @@
 /**
  * Vista semanal de la agenda.
- * Cabecera: mes/año (Ene '26), número de semana con flechas, inicial del día y fecha.
+ * Cabecera: mes/año (Ene '26), número de semana con flechas, nombre del día y fecha.
  * Grid: franjas horarias (rango según opciones + eventos de la semana) y 7 columnas con líneas punteadas y verticales.
  */
 
@@ -31,21 +31,20 @@ import type { Reminder } from '../../types/reminder';
 import { reminderEndMinutesForLayout } from '../../utils/scheduleHours';
 import { scaledFontSize } from '../../utils/typography';
 import { EventTitleWithIcons } from '../EventTitleWithIcons';
+import { WEEK_DAY_LETTERS } from '../../constants/agenda';
 
 const TIME_COLUMN_WIDTH = 46;
 const NUM_COLS = 7;
 /** Altura mínima de cada fila horaria (px); evita celdas demasiado bajas en pantallas anchas. */
-const WEEK_MIN_ROW_HEIGHT = 64;
-/** Ancho mínimo de cada columna/día (px). Con scroll horizontal, esto “crea más grilla” (más espacio por casilla). */
-const WEEK_MIN_DAY_COL_WIDTH = 78;
+const WEEK_MIN_ROW_HEIGHT = 40;
+/** Ancho mínimo de cada columna/día (px). Debe caber “Miércoles” en cabecera. */
+const WEEK_MIN_DAY_COL_WIDTH = 92;
 /** Ancho mínimo de carril cuando hay solapes. */
 const LANE_MIN_WIDTH = 30;
 const LANE_GAP = 2;
 const COLUMN_HPADDING = 4;
 /** Tope de altura visual del bloque en función del ancho del carril (evita “tiras” muy alargadas). */
 const WEEK_BLOCK_MAX_HEIGHT_RATIO = 2.75;
-/** Domingo → sábado: una letra por columna (martes y miércoles comparten M). */
-const WEEK_DAY_INITIALS = ['D', 'L', 'M', 'M', 'J', 'V', 'S'] as const;
 const MIN_BLOCK_HEIGHT = 20;
 const CELL_STACK_PADDING_V = 2;
 const CELL_STACK_GAP = 2;
@@ -377,10 +376,10 @@ export function WeekView({
         dayDateRow: { flexDirection: 'row', paddingVertical: 8, paddingLeft: 0, paddingRight: 0 },
         dayDateSpacer: { width: TIME_COLUMN_WIDTH, zIndex: 20, elevation: 20 },
         dayDateCells: { flexDirection: 'row' },
-        dayDateCell: { alignItems: 'center', justifyContent: 'center', minWidth: 0 },
+        dayDateCell: { alignItems: 'center', justifyContent: 'center', minWidth: 0, paddingHorizontal: 2 },
         dayLetter: {
-          fontSize: fs(14),
-          lineHeight: Math.round(fs(14) * 1.12),
+          fontSize: fs(11),
+          lineHeight: Math.round(fs(11) * 1.15),
           fontFamily: 'PixelOperator',
           fontWeight: 'normal',
           color: colors.textSecondary,
@@ -671,10 +670,10 @@ export function WeekView({
             <View style={[styles.dayDateRow, { width: weekContentW }]}>
               <Animated.View style={[styles.dayDateSpacer, { transform: [{ translateX: hScrollX }] }]} />
               <View style={styles.dayDateCells}>
-                {WEEK_DAY_INITIALS.map((letter, i) => (
+                {WEEK_DAY_LETTERS.map((dayName, i) => (
                   <View key={i} style={[styles.dayDateCell, { width: dayColW }]}>
-                    <Text style={styles.dayLetter} numberOfLines={1}>
-                      {letter}
+                    <Text style={styles.dayLetter} numberOfLines={2}>
+                      {dayName}
                     </Text>
                     <Text style={styles.dateNum}>{getDayOfMonth(weekDates[i])}</Text>
                   </View>

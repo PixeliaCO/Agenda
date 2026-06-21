@@ -39,17 +39,17 @@
     "web": {
       "favicon": "./assets/LogoApp.png"
     },
-    "extra": {
-      "eas": {
-        "projectId": "f0c44808-f1ba-4512-bb4b-0feedb02bf33"
-      }
-    },
-    "owner": "andresfr",
+    "owner": "andresrodasfm",
     "runtimeVersion": {
       "policy": "appVersion"
     },
     "updates": {
-      "url": "https://u.expo.dev/f0c44808-f1ba-4512-bb4b-0feedb02bf33"
+      "url": "https://u.expo.dev/7a96110d-95a9-42fd-b532-f304c3cb8552"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "7a96110d-95a9-42fd-b532-f304c3cb8552"
+      }
     }
   }
 }

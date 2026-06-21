@@ -71,6 +71,35 @@ const MODAL_KEYBOARD_EXTRA = 32;
 /** Minutos en pasos de 5 (selector estilo Palm). */
 const PALM_MINUTE_STEPS = ['00', '05', '10', '15', '20', '25', '30', '35', '40', '45', '50', '55'] as const;
 
+/** Filas visibles en cada columna hora/minuto del selector Palm. */
+const PALM_PICKER_ROW_COUNT = 12;
+
+/** En Android (HyperOS/MIUI) fade + KAV dentro de Modal transparente provoca ghosting. */
+const MODAL_ANIMATION = Platform.OS === 'android' ? ('none' as const) : ('fade' as const);
+
+type ModalOverlayProps = {
+  style: object;
+  /** Solo iOS: KeyboardAvoidingView con padding. Android usa resize del manifest. */
+  avoidKeyboard?: boolean;
+  insets: { top: number };
+  children: React.ReactNode;
+};
+
+function ModalOverlay({ style, avoidKeyboard = false, insets, children }: ModalOverlayProps) {
+  if (Platform.OS === 'ios' && avoidKeyboard) {
+    return (
+      <KeyboardAvoidingView
+        behavior="padding"
+        style={style}
+        keyboardVerticalOffset={Math.max(insets.top, 12)}
+      >
+        {children}
+      </KeyboardAvoidingView>
+    );
+  }
+  return <View style={style}>{children}</View>;
+}
+
 type PalmHourRow = { label: string; hour: number; pm: boolean };
 
 const PALM_HOUR_ROWS_PM: PalmHourRow[] = [
@@ -426,8 +455,8 @@ export function EventDetailsModal({
           paddingHorizontal: 18,
           paddingTop: 14,
           paddingBottom: 18,
+          overflow: 'hidden' as const,
           zIndex: 2,
-          ...(Platform.OS === 'android' ? { elevation: 8 } : {}),
         },
         /** Misma tarjeta centrada que «Nuevo», para detalles del evento. */
         detailsCenterCard: {
@@ -441,8 +470,8 @@ export function EventDetailsModal({
           paddingHorizontal: 16,
           paddingTop: 12,
           paddingBottom: 10,
+          overflow: 'hidden' as const,
           zIndex: 2,
-          ...(Platform.OS === 'android' ? { elevation: 8 } : {}),
         },
         backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: colors.backdrop },
         box: {
@@ -822,8 +851,6 @@ export function EventDetailsModal({
           alignItems: 'center' as const,
         },
         palmRowCell: {
-          flex: 1,
-          minHeight: 24,
           alignItems: 'center' as const,
           justifyContent: 'center' as const,
         },
@@ -1035,8 +1062,14 @@ export function EventDetailsModal({
     endHour.trim() === '' || endMin.trim() === ''
       ? ''
       : `${endHour}:${endMin.padStart(2, '0')} ${endPm ? 'p.m.' : 'a.m.'}`;
-  /** Altura fija de las columnas hora/minuto (12 filas sin scroll). */
-  const newPalmColHeight = Math.min(480, Math.max(340, Math.floor(windowHeight * 0.52)));
+  /** Altura alineada a filas fijas (evita overflow/ghosting en Android con fuente grande). */
+  const palmColBudget = Math.min(
+    480,
+    Math.max(300, Math.floor((windowHeight - insets.top - insets.bottom - 100) * 0.48))
+  );
+  const palmRowHeight = Math.max(26, Math.floor(palmColBudget / PALM_PICKER_ROW_COUNT));
+  const palmColHeight = palmRowHeight * PALM_PICKER_ROW_COUNT;
+  const palmRowStyle = { height: palmRowHeight };
 
   const renderPalmTimePickers = (onPalmOk: () => void, onPalmCancel: () => void) => (
     <>
@@ -1102,7 +1135,7 @@ export function EventDetailsModal({
                     </View>
                     <View style={styles.palmRight}>
                       <View style={styles.palmColWrap}>
-                        <View style={[styles.palmScrollCol, { height: newPalmColHeight }]}>
+                        <View style={[styles.palmScrollCol, { height: palmColHeight }]}>
                           <View style={styles.palmColumnInner}>
                             {!palmPickerPm ? (
                               <>
@@ -1117,6 +1150,7 @@ export function EventDetailsModal({
                                       key="am-12"
                                       style={({ pressed }) => [
                                         styles.palmRowCell,
+                                        palmRowStyle,
                                         styles.palmScrollItem,
                                         active && styles.palmScrollItemActive,
                                         pressed && { opacity: 0.85 },
@@ -1141,6 +1175,7 @@ export function EventDetailsModal({
                                       key={`am-${row.label}`}
                                       style={({ pressed }) => [
                                         styles.palmRowCell,
+                                        palmRowStyle,
                                         styles.palmScrollItem,
                                         active && styles.palmScrollItemActive,
                                         pressed && { opacity: 0.85 },
@@ -1166,6 +1201,7 @@ export function EventDetailsModal({
                                       key="am-11-arrow"
                                       style={[
                                         styles.palmRowCell,
+                                        palmRowStyle,
                                         styles.palmScrollItem,
                                         styles.palmTwelveWithArrow,
                                         active && styles.palmScrollItemActive,
@@ -1212,6 +1248,7 @@ export function EventDetailsModal({
                                       key="pm-12-arrow"
                                       style={[
                                         styles.palmRowCell,
+                                        palmRowStyle,
                                         styles.palmScrollItem,
                                         styles.palmTwelveWithArrow,
                                         active && styles.palmScrollItemActive,
@@ -1254,6 +1291,7 @@ export function EventDetailsModal({
                                       key={`pm-${row.label}`}
                                       style={({ pressed }) => [
                                         styles.palmRowCell,
+                                        palmRowStyle,
                                         styles.palmScrollItem,
                                         active && styles.palmScrollItemActive,
                                         pressed && { opacity: 0.85 },
@@ -1273,7 +1311,7 @@ export function EventDetailsModal({
                           </View>
                         </View>
                       </View>
-                      <View style={[styles.palmScrollCol, { height: newPalmColHeight }]}>
+                      <View style={[styles.palmScrollCol, { height: palmColHeight }]}>
                         <View style={styles.palmColumnInner}>
                           {PALM_MINUTE_STEPS.map((mm) => {
                             const mNow = palmTimeFocus === 'start' ? startMin : endMin;
@@ -1284,6 +1322,7 @@ export function EventDetailsModal({
                                 key={mm}
                                 style={({ pressed }) => [
                                   styles.palmRowCell,
+                                  palmRowStyle,
                                   styles.palmScrollItem,
                                   active && styles.palmScrollItemActive,
                                   pressed && { opacity: 0.85 },
@@ -1334,13 +1373,9 @@ export function EventDetailsModal({
 
   return (
     <>
-      <Modal visible={visible} animationType="fade" transparent>
+      <Modal visible={visible} animationType={MODAL_ANIMATION} transparent>
         {reminder ? (
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          style={styles.overlayCenter}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? Math.max(insets.top, 12) : 0}
-        >
+        <ModalOverlay avoidKeyboard style={styles.overlayCenter} insets={insets}>
           <TouchableOpacity style={styles.newEventBackdrop} activeOpacity={1} onPress={onClose} />
           <View style={styles.detailsCenterCard}>
             <ScrollView
@@ -1472,13 +1507,9 @@ export function EventDetailsModal({
               </TouchableOpacity>
             </View>
           </View>
-        </KeyboardAvoidingView>
+        </ModalOverlay>
         ) : (
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          style={styles.overlayCenter}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? Math.max(insets.top, 12) : 0}
-        >
+        <ModalOverlay style={styles.overlayCenter} insets={insets}>
           <TouchableOpacity style={styles.newEventBackdrop} activeOpacity={1} onPress={onClose} />
           <View style={styles.newEventCard}>
                 <View style={[styles.header, { marginBottom: 12 }]}>
@@ -1486,21 +1517,17 @@ export function EventDetailsModal({
                 </View>
                 {renderPalmTimePickers(() => void handleOK(), onClose)}
           </View>
-        </KeyboardAvoidingView>
+        </ModalOverlay>
         )}
       </Modal>
 
       <Modal
         visible={reminder != null && detailsPalmPickerVisible}
-        animationType="fade"
+        animationType={MODAL_ANIMATION}
         transparent
         onRequestClose={() => closeDetailsPalmPicker(false)}
       >
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          style={styles.overlayCenter}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? Math.max(insets.top, 12) : 0}
-        >
+        <ModalOverlay style={styles.overlayCenter} insets={insets}>
           <TouchableOpacity
             style={styles.newEventBackdrop}
             activeOpacity={1}
@@ -1515,17 +1542,13 @@ export function EventDetailsModal({
               () => closeDetailsPalmPicker(false)
             )}
           </View>
-        </KeyboardAvoidingView>
+        </ModalOverlay>
       </Modal>
 
-      <Modal visible={noteModalVisible} animationType="fade" transparent onRequestClose={dismissNoteModal}>
+      <Modal visible={noteModalVisible} animationType={MODAL_ANIMATION} transparent onRequestClose={dismissNoteModal}>
         <View style={styles.noteModalRoot}>
           <TouchableOpacity style={styles.noteModalBackdrop} activeOpacity={1} onPress={dismissNoteModal} />
-          <KeyboardAvoidingView
-            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-            keyboardVerticalOffset={Platform.OS === 'ios' ? Math.max(insets.top, 12) : 0}
-            style={styles.noteModalCenter}
-          >
+          <ModalOverlay avoidKeyboard style={styles.noteModalCenter} insets={insets}>
             <View style={styles.noteModalCard}>
               <Text style={styles.noteModalTitle}>Nota</Text>
               <TextInput
@@ -1551,13 +1574,13 @@ export function EventDetailsModal({
                 </View>
               </View>
             </View>
-          </KeyboardAvoidingView>
+          </ModalOverlay>
         </View>
       </Modal>
 
       <Modal
         visible={alarmUnitPickerVisible}
-        animationType="fade"
+        animationType={MODAL_ANIMATION}
         transparent
         onRequestClose={() => setAlarmUnitPickerVisible(false)}
       >

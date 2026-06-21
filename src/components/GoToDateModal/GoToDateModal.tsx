@@ -155,15 +155,17 @@ export function GoToDateModal({
         dayHeaderRow: {
           flexDirection: 'row',
           paddingHorizontal: 8,
-          paddingBottom: 4,
+          paddingBottom: 6,
+          paddingTop: 4,
           borderBottomWidth: 1,
           borderColor: colors.line,
           marginHorizontal: 12,
+          minHeight: Math.round(fs(9) * 2.4),
         },
-        dayHeaderCell: { flex: 1, alignItems: 'center' },
+        dayHeaderCell: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 1 },
         dayHeaderText: {
-          fontSize: fs(8),
-          lineHeight: Math.round(fs(8) * 1.12),
+          fontSize: fs(9),
+          lineHeight: Math.round(fs(9) * 1.2),
           color: colors.textSecondary,
           fontFamily: 'PixelOperator',
           fontWeight: 'normal',
@@ -258,10 +260,10 @@ export function GoToDateModal({
           </View>
 
           <View style={styles.dayHeaderRow}>
-            {WEEK_DAY_LETTERS.map((letter, i) => (
+            {WEEK_DAY_LETTERS.map((dayName, i) => (
               <View key={i} style={styles.dayHeaderCell}>
-                <Text style={styles.dayHeaderText} numberOfLines={3}>
-                  {letter}
+                <Text style={styles.dayHeaderText} numberOfLines={2}>
+                  {dayName}
                 </Text>
               </View>
             ))}

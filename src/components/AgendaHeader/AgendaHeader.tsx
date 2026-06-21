@@ -33,9 +33,9 @@ export function AgendaHeader({
     const dateFontSize = scaledFontSize(15, fontScale);
     const dayLabelFs = f(12);
     const dayLabelLineHeight = Math.round(dayLabelFs * 1.15);
-    /** Ancho mínimo para “Miércoles” en una sola línea (fuente pixel ~0.52× por carácter). */
-    const dayCellMinW = Math.max(58, Math.ceil(dayLabelFs * 'Miércoles'.length * 0.52));
-    const dayLabelMinH = dayLabelLineHeight + 10;
+    /** Ancho mínimo para “Miércoles” en una sola línea (fuente pixel ~0.58× por carácter). */
+    const dayCellMinW = Math.max(76, Math.ceil(dayLabelFs * 'Miércoles'.length * 0.58));
+    const dayLabelMinH = dayLabelLineHeight * 2 + 10;
     const arrowMin = Math.round(Math.max(32, Math.min(44, 36 * Math.min(fontScale, 1.2))));
     const baseText = { fontFamily: 'PixelOperator', fontWeight: 'normal' as const };
     return StyleSheet.create({
@@ -154,7 +154,7 @@ export function AgendaHeader({
             contentContainerStyle={styles.dayLettersScrollContent}
             bounces={false}
           >
-            {DAY_LETTERS.map((letter, index) => (
+            {DAY_LETTERS.map((dayName, index) => (
               <Pressable
                 key={index}
                 onPress={() => onSelectDay(index)}
@@ -165,12 +165,12 @@ export function AgendaHeader({
                     styles.dayLetterText,
                     selectedDayIndex === index && styles.dayLetterTextSelected,
                   ]}
-                  numberOfLines={1}
+                  numberOfLines={2}
                   {...(Platform.OS === 'ios'
                     ? ({ adjustsFontSizeToFit: true, minimumFontScale: 0.72 } as const)
                     : {})}
                 >
-                  {letter}
+                  {dayName}
                 </Text>
               </Pressable>
             ))}

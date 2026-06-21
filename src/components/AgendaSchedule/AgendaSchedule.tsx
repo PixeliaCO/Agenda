@@ -30,8 +30,8 @@ const notaPng = require('../../../assets/nota.png');
 /** Espacio extra bajo el contenido cuando hay teclado (evita que el campo quede pegado al teclado). */
 const KEYBOARD_SCROLL_EXTRA = 36;
 
-const MIN_ROW_HEIGHT = 44;
-const HOUR_ROW_HEIGHT = 56;
+const MIN_ROW_HEIGHT = 28;
+const HOUR_ROW_HEIGHT = 35;
 /**
  * Ancho del cajón de horas (texto centrado; sin estirar a todo el ancho).
  * Ajustado a etiquetas tipo "12:30" + padding interno simétrico.
@@ -73,6 +73,8 @@ export type AgendaScheduleProps = {
   onReminderPress?: (reminder: Reminder) => void;
   /** Pulsar la hora de inicio en la columna de horas: detalles completos (modal). */
   onReminderHourPress?: (reminder: Reminder) => void;
+  /** Pulsar la hora en una franja vacía: mismo modal que «Nuevo», con esa hora. */
+  onEmptyHourPress?: (hourLabel: string) => void;
   onReminderAlarmIconPress?: (reminder: Reminder) => void;
   onReminderNoteIconPress?: (reminder: Reminder) => void;
   /** ID del recordatorio seleccionado (resaltado en la lista) */
@@ -225,6 +227,7 @@ export function AgendaSchedule({
   onSlotPress,
   onReminderPress,
   onReminderHourPress,
+  onEmptyHourPress,
   onReminderAlarmIconPress,
   onReminderNoteIconPress,
   selectedReminderId = null,
@@ -979,6 +982,21 @@ export function AgendaSchedule({
                             hitSlop={8}
                             accessibilityRole="button"
                             accessibilityLabel={`Hora de inicio ${hourLabel}, detalles del evento`}
+                          >
+                            <Text style={styles.timeLabel} numberOfLines={1}>
+                              {hourLabel}
+                            </Text>
+                          </Pressable>
+                        ) : eventsWithTitleHere.length === 0 ? (
+                          <Pressable
+                            onPress={() => {
+                              if (titleEditReminderId) onCommitTitleEdit?.();
+                              if (inlineSlot != null) tryCommitInlineAtActiveSlot();
+                              onEmptyHourPress?.(hourLabel);
+                            }}
+                            hitSlop={8}
+                            accessibilityRole="button"
+                            accessibilityLabel={`Hora ${hourLabel}, nuevo evento`}
                           >
                             <Text style={styles.timeLabel} numberOfLines={1}>
                               {hourLabel}

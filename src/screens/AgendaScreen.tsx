@@ -356,6 +356,21 @@ export function AgendaScreen() {
     [commitPendingTitleEdit]
   );
 
+  const handleEmptyHourPress = useCallback(
+    (hourLabel: string) => {
+      if (!commitPendingTitleEdit()) return;
+      setInlineSlot(null);
+      setTitleEditReminderId(null);
+      setTitleEditDraft('');
+      titleEditReminderIdRef.current = null;
+      setSelectedReminder(null);
+      setDetailsInitialTarget(null);
+      setDetailsDefaultStartTime(slotLabelTo24H(hourLabel));
+      setDetailsVisible(true);
+    },
+    [commitPendingTitleEdit]
+  );
+
   const handleReminderAlarmIconPress = useCallback(
     (r: Reminder) => {
       if (!commitPendingTitleEdit()) return;
@@ -583,6 +598,7 @@ export function AgendaScreen() {
                 setInlineSlot(null);
               }}
               onReminderHourPress={handleReminderHourPress}
+              onEmptyHourPress={handleEmptyHourPress}
               onReminderAlarmIconPress={handleReminderAlarmIconPress}
               onReminderNoteIconPress={handleReminderNoteIconPress}
               selectedReminderId={selectedReminder?.id ?? null}
