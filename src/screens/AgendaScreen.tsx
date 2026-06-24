@@ -21,7 +21,6 @@ import { buildHoursLabelsWithOptional30 } from '../utils/scheduleHours';
 import {
   formatDisplayDate,
   formatWeekMonthYearRange,
-  formatMonthYearChip,
   getWeekNumber,
   getSundayOfWeek,
   getDayIndexFromDate,
@@ -139,7 +138,7 @@ export function AgendaScreen() {
   const weekSunday = useMemo(() => getSundayOfWeek(weekAnchor), [weekAnchor]);
   const weekHeaderLabel = useMemo(() => formatWeekMonthYearRange(weekSunday), [weekSunday]);
   const weekNumber = useMemo(() => getWeekNumber(weekSunday), [weekSunday]);
-  const monthHeaderLabel = useMemo(() => formatMonthYearChip(monthAnchor), [monthAnchor]);
+  const monthHeaderLabel = useMemo(() => formatDisplayDate(selectedDate), [selectedDate]);
 
   const loadReminders = useCallback(async () => {
     const list = await getRemindersByDate(selectedDate);

@@ -149,7 +149,7 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
   );
 
   const fontScale =
-    preferences.fontSize === 'small' ? 0.88 : preferences.fontSize === 'large' ? 1.18 : 1;
+    preferences.fontSize === 'small' ? 0.82 : preferences.fontSize === 'large' ? 1.4 : 1;
   const colors = useMemo(
     () => (preferences.darkMode ? darkTheme : lightTheme),
     [preferences.darkMode]

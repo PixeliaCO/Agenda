@@ -193,17 +193,6 @@ export function time12To24(hour: number, min: number, pm: boolean): string {
   return `${h < 10 ? '0' + h : h}:${m < 10 ? '0' + m : m}`;
 }
 
-/** Nombres de mes para vista de mes */
-/** Formatea mes y año para cabecera de vista mes: "Marzo 2026" */
-export function formatMonthYearLong(date: Date): string {
-  return `${MONTHS_LONG[date.getMonth()]} ${date.getFullYear()}`;
-}
-
-/** Formatea mes y año para recuadro azul Palm: "Jun 26" */
-export function formatMonthYearChip(date: Date): string {
-  return `${MONTHS_SHORT[date.getMonth()]} ${String(date.getFullYear()).slice(-2)}`;
-}
-
 /** Fecha completa para detalles: "Viernes, 13 de marzo de 2026" */
 export function formatDateFull(dateISO: string): string {
   const d = new Date(dateISO + 'T12:00:00');

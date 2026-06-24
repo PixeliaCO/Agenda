@@ -46,8 +46,6 @@ const MIN_BLOCK_HEIGHT = 20;
 const CELL_STACK_PADDING_V = 2;
 const CELL_STACK_GAP = 2;
 const CELL_EVENT_HIT_SLOP = 10;
-/** Puntos dibujados entre filas horarias (evita borderStyle dotted en Android). */
-const WEEK_ROW_DOT_COUNT = 48;
 
 type WeekGridRow = { slot24: string; display12h: string };
 type WeekVisualRow = { slot24: string; display12h: string; hour: number; slotIndex: number };
@@ -510,6 +508,8 @@ export function WeekView({
   );
 
   const gridTotalW = TIME_COLUMN_WIDTH + NUM_COLS * dayColW;
+  // Puntos suficientes para cubrir todas las columnas (cada punto ocupa 2px + 3px de margen).
+  const weekDotCount = Math.ceil((NUM_COLS * dayColW) / 5);
 
   const gridContent = (
     <View
@@ -538,7 +538,7 @@ export function WeekView({
             ))}
           </View>
           <View style={[styles.hourRowSeparator, { left: TIME_COLUMN_WIDTH }]}>
-            {Array.from({ length: WEEK_ROW_DOT_COUNT }).map((_, dotIndex) => (
+            {Array.from({ length: weekDotCount }).map((_, dotIndex) => (
               <View key={dotIndex} style={styles.hourRowSeparatorDot} />
             ))}
           </View>

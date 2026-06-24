@@ -107,6 +107,18 @@ class AgendaAlarmNativeModule(reactContext: ReactApplicationContext) :
       .apply()
   }
 
+  /** ¿Tiene permiso "Mostrar sobre otras apps"? Exime de las restricciones de lanzar actividad en segundo plano. */
+  @ReactMethod
+  fun canDrawOverlays(promise: com.facebook.react.bridge.Promise) {
+    try {
+      val ok = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M)
+        android.provider.Settings.canDrawOverlays(reactApplicationContext) else true
+      promise.resolve(ok)
+    } catch (e: Exception) {
+      promise.resolve(false)
+    }
+  }
+
   /** Fallback cuando el sistema bloquea fullScreenIntent (p. ej. sin permiso FSI en API 34+). */
   @ReactMethod
   fun launchLockScreenActivity() {
@@ -173,7 +185,6 @@ class AlarmLockscreenActivity : Activity() {
   private val cScreen = 0xFFFFFFFF.toInt()
   private val cText = 0xFF152238.toInt()
   private val cTextSec = 0xFF4A5F78.toInt()
-  private val cHint = 0xFF6B7F95.toInt()
   private val cLine = 0xFFC5D4E6.toInt()
   private val cStrongBorder = 0xFF243B53.toInt()
   private val cFooterBg = 0xFFC3C3C3.toInt()
@@ -328,25 +339,6 @@ class AlarmLockscreenActivity : Activity() {
     chipRow.addView(makeChip(dateChip), LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT))
     card.addView(
       chipRow,
-      LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT),
-    )
-
-    card.addView(
-      View(this).apply { setBackgroundColor(cLine) },
-      LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(1)).apply {
-        topMargin = dp(12)
-        bottomMargin = dp(12)
-      },
-    )
-
-    card.addView(
-      TextView(this).apply {
-        text = "↑  Desliza hacia arriba para completar"
-        textSize = 13f
-        setTextColor(cHint)
-        gravity = Gravity.CENTER_HORIZONTAL
-        typeface = Typeface.DEFAULT_BOLD
-      },
       LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT),
     )
 
@@ -512,6 +504,33 @@ class AlarmLockscreenActivity : Activity() {
     }
   }
 
+  /**
+   * Entrega la acción al contexto JS sin abrir la app (si está vivo). Devuelve false si no hay contexto.
+   */
+  private fun emitBridgeDirect(
+    action: String,
+    reminderId: String,
+    alarmKind: String,
+    notificationId: String,
+    titleSnapshot: String,
+    startTimeSnapshot: String,
+    dateSnapshot: String,
+  ): Boolean {
+    val app = application as? com.facebook.react.ReactApplication ?: return false
+    val ctx = app.reactNativeHost.reactInstanceManager.currentReactContext ?: return false
+    val map = com.facebook.react.bridge.Arguments.createMap()
+    map.putString("action", action)
+    map.putString("reminderId", reminderId)
+    map.putString("alarmKind", alarmKind)
+    map.putString("notificationId", notificationId)
+    map.putString("titleSnapshot", titleSnapshot)
+    map.putString("startTimeSnapshot", startTimeSnapshot)
+    map.putString("dateSnapshot", dateSnapshot)
+    ctx.getJSModule(com.facebook.react.modules.core.DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+      .emit("agenda:alarm-bridge", map)
+    return true
+  }
+
   private fun deliverBridge(
     action: String,
     reminderId: String,
@@ -521,6 +540,19 @@ class AlarmLockscreenActivity : Activity() {
     startTimeSnapshot: String,
     dateSnapshot: String,
   ) {
+    // Detener el sonido insistente al instante (no esperar a que JS cancele la notificación).
+    try {
+      (getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager).cancelAll()
+    } catch (_: Exception) {
+    }
+    // Completado / Recordar: solo detener la alarma; no tiene sentido abrir la app.
+    // Reprogramar sí necesita la UI (modal de detalles).
+    if (action != "REPROGRAMAR" &&
+      emitBridgeDirect(action, reminderId, alarmKind, notificationId, titleSnapshot, startTimeSnapshot, dateSnapshot)
+    ) {
+      finish()
+      return
+    }
     val launch = packageManager.getLaunchIntentForPackage(packageName)
     if (launch != null) {
       launch.addFlags(
