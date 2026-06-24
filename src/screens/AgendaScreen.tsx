@@ -354,10 +354,28 @@ export function AgendaScreen() {
     hourIndex: number;
     fragmentIndex: number;
   }) => {
-    // Tocar una hora vacía → escribir directo (inline). El modal se abre solo con el reloj.
+    // Tocar el cajón de una hora vacía → escribir directo (inline). La hora abre el modal.
     commitPendingTitleEdit();
     setSelectedReminder(null);
     setInlineSlot(`${payload.hourIndex}-${payload.fragmentIndex}`);
+  };
+
+  // Tocar el número de hora en una franja vacía → modal «Nuevo» con esa hora (fin +1h lo pone el modal).
+  const handleEmptyHourLabelPress = (hourLabel: string, hourIndex: number) => {
+    if (!commitPendingTitleEdit()) return;
+    const startTime =
+      scheduleHourMinutes != null && scheduleHourMinutes[hourIndex] != null
+        ? `${String(Math.floor(scheduleHourMinutes[hourIndex] / 60)).padStart(2, '0')}:${String(scheduleHourMinutes[hourIndex] % 60).padStart(2, '0')}`
+        : slotLabelTo24H(hourLabel);
+    setInlineSlot(null);
+    setTitleEditReminderId(null);
+    setTitleEditDraft('');
+    titleEditReminderIdRef.current = null;
+    setSelectedReminder(null);
+    setDetailsInitialTarget(null);
+    setDetailsDefaultStartTime(startTime);
+    setDetailsDefaultTitle('');
+    setDetailsVisible(true);
   };
 
   const handleInlineSave = async (hourLabel: string, title: string, rowIndex: number) => {
@@ -433,7 +451,7 @@ export function AgendaScreen() {
   const handleReminderHourPress = useCallback(
     (r: Reminder) => {
       if (!commitPendingTitleEdit()) return;
-      setDetailsInitialTarget('time');
+      setDetailsInitialTarget(null);
       setTitleEditReminderId(null);
       setTitleEditDraft('');
       titleEditReminderIdRef.current = null;
@@ -711,6 +729,7 @@ export function AgendaScreen() {
               }}
               onReminderHourPress={handleReminderHourPress}
               onEmptyHourPress={handleEmptyHourPress}
+              onEmptyHourLabelPress={handleEmptyHourLabelPress}
               onReminderAlarmIconPress={handleReminderAlarmIconPress}
               onReminderNoteIconPress={handleReminderNoteIconPress}
               selectedReminderId={selectedReminder?.id ?? null}

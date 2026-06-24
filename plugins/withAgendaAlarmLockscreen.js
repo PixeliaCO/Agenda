@@ -483,13 +483,18 @@ class AlarmLockscreenActivity : Activity() {
     return try {
       val p = iso.split("-")
       if (p.size != 3) return iso
-      val months = arrayOf(
-        "", "Ene", "Feb", "Mar", "Abr", "May", "Jun",
-        "Jul", "Ago", "Sep", "Oct", "Nov", "Dic",
+      val weekdays = arrayOf(
+        "domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado",
       )
-      val m = p[1].toInt()
-      val name = if (m in 1..12) months[m] else p[1]
-      p[2].toInt().toString() + " " + name
+      val months = arrayOf(
+        "", "enero", "febrero", "marzo", "abril", "mayo", "junio",
+        "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre",
+      )
+      val cal = java.util.Calendar.getInstance()
+      cal.set(p[0].toInt(), p[1].toInt() - 1, p[2].toInt(), 12, 0, 0)
+      val weekday = weekdays[cal.get(java.util.Calendar.DAY_OF_WEEK) - 1]
+      val month = months[p[1].toInt()]
+      weekday + " " + p[2].toInt().toString() + " " + month + " " + p[0]
     } catch (_: Exception) {
       iso
     }

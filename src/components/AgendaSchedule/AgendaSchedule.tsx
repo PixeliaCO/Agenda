@@ -79,6 +79,8 @@ export type AgendaScheduleProps = {
   onReminderHourPress?: (reminder: Reminder) => void;
   /** Pulsar la hora en una franja vacía: mismo modal que «Nuevo», con esa hora. */
   onEmptyHourPress?: (hourLabel: string, draftTitle?: string) => void;
+  /** Pulsar el número de hora en una franja vacía: abre el modal «Nuevo» con esa hora. */
+  onEmptyHourLabelPress?: (hourLabel: string, hourIndex: number) => void;
   onReminderAlarmIconPress?: (reminder: Reminder) => void;
   onReminderNoteIconPress?: (reminder: Reminder) => void;
   /** ID del recordatorio seleccionado (resaltado en la lista) */
@@ -232,6 +234,7 @@ export function AgendaSchedule({
   onReminderPress,
   onReminderHourPress,
   onEmptyHourPress,
+  onEmptyHourLabelPress,
   onReminderAlarmIconPress,
   onReminderNoteIconPress,
   selectedReminderId = null,
@@ -1052,7 +1055,11 @@ export function AgendaSchedule({
                           </Pressable>
                         ) : eventsWithTitleHere.length === 0 ? (
                           <Pressable
-                            onPress={rowSlotPress}
+                            onPress={() => {
+                              if (titleEditReminderId) onCommitTitleEdit?.();
+                              if (inlineSlot != null) tryCommitInlineAtActiveSlot();
+                              onEmptyHourLabelPress?.(hourLabel, hourIndex);
+                            }}
                             hitSlop={8}
                             accessibilityRole="button"
                             accessibilityLabel={`Hora ${hourLabel}, nuevo evento`}

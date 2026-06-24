@@ -46,7 +46,7 @@ export type ThemeColors = {
   /** Día seleccionado en la barra de letras (fondo azul, texto blanco) */
   agendaHeaderSelectedBg: string;
   agendaHeaderSelectedText: string;
-  /** Recuadro azul de la fecha ("8 Ene 26") */
+  /** Recuadro azul de la fecha ("miércoles 24 junio 2026") */
   agendaDateChipBg: string;
   agendaDateChipText: string;
   /** Línea azul sólida bajo la cabecera (y borde del grid) */

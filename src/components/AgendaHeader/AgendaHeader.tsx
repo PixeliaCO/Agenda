@@ -1,16 +1,17 @@
 /**
- * Cabecera de la pantalla de agenda (estilo Palm Datebook del Treo de referencia).
- * Barra de título gris claro: fecha en recuadro azul a la izquierda y selector
- * ◀ lune mart mier juev vier saba domi ▶ a la derecha. Línea azul sólida debajo.
+ * Cabecera de la pantalla de agenda (estilo Palm Datebook).
+ * Fila 1: fecha completa en barra azul. Fila 2: ◀ días completos ▶.
  */
 
-import React from 'react';
-import { View, Text, TouchableOpacity, Pressable } from 'react-native';
-import { SINGLE_DAY_LETTERS } from '../../constants/agenda';
-import { AgendaNavBar, useAgendaNavStyles } from '../AgendaNavBar';
+import React, { useMemo } from 'react';
+import { View, Text, TouchableOpacity, Pressable, StyleSheet } from 'react-native';
+import { DAY_LETTERS } from '../../constants/agenda';
+import { usePreferences } from '../../contexts/PreferencesContext';
+import { scaledFontSize, titleFont } from '../../utils/typography';
+import { useAgendaNavStyles } from '../AgendaNavBar';
 
 export type AgendaHeaderProps = {
-  /** Fecha corta para el recuadro azul: "8 Ene 26". */
+  /** Fecha para la barra azul: "miércoles 24 junio 2026". */
   displayDate: string;
   selectedDayIndex: number;
   onSelectDay: (index: number) => void;
@@ -27,43 +28,95 @@ export function AgendaHeader({
   onNext,
   onDatePress,
 }: AgendaHeaderProps) {
-  const styles = useAgendaNavStyles();
+  const { colors, fontScale } = usePreferences();
+  const navStyles = useAgendaNavStyles();
+  const styles = useMemo(() => {
+    const f = (n: number) => scaledFontSize(n, fontScale);
+    const rowPadH = Math.max(2, Math.round(4 * fontScale));
+    const rowPadV = Math.max(2, Math.round(4 * fontScale));
+    return StyleSheet.create({
+      header: {
+        backgroundColor: colors.agendaHeaderBg,
+        borderBottomWidth: 3,
+        borderBottomColor: colors.agendaHeaderRule,
+      },
+      dateRow: {
+        justifyContent: 'center',
+        paddingHorizontal: Math.max(6, Math.round(10 * fontScale)),
+        paddingVertical: Math.max(4, Math.round(6 * fontScale)),
+        backgroundColor: colors.agendaDateChipBg,
+      },
+      dateText: {
+        fontSize: f(9),
+        color: colors.agendaDateChipText,
+        ...titleFont,
+        textAlign: 'center',
+      },
+      selectorRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: rowPadH,
+        paddingVertical: rowPadV,
+        minHeight: Math.max(26, Math.round(30 * fontScale)),
+      },
+      dayText: {
+        width: '100%',
+        fontSize: f(7),
+        color: colors.agendaHeaderText,
+        ...titleFont,
+        textAlign: 'center',
+      },
+      dayTextSelected: {
+        color: colors.agendaHeaderSelectedText,
+      },
+    });
+  }, [colors, fontScale]);
 
   return (
-    <AgendaNavBar chipLabel={displayDate} onChipPress={onDatePress}>
-      <View style={styles.rightWrap}>
-        <TouchableOpacity style={styles.arrowCell} onPress={onPrevious} hitSlop={8}>
-          <Text style={styles.arrowText}>{'◀'}</Text>
+    <View style={styles.header}>
+      <Pressable onPress={onDatePress} style={styles.dateRow} disabled={!onDatePress}>
+        <Text
+          style={styles.dateText}
+          numberOfLines={1}
+          adjustsFontSizeToFit
+          minimumFontScale={0.7}
+        >
+          {displayDate}
+        </Text>
+      </Pressable>
+      <View style={styles.selectorRow}>
+        <TouchableOpacity style={navStyles.arrowCell} onPress={onPrevious} hitSlop={8}>
+          <Text style={navStyles.arrowText}>{'◀'}</Text>
         </TouchableOpacity>
-        <View style={styles.selector}>
-          {SINGLE_DAY_LETTERS.map((letter, index) => (
+        <View style={navStyles.selector}>
+          {DAY_LETTERS.map((dayName, index) => (
             <Pressable
               key={index}
               onPress={() => onSelectDay(index)}
               style={[
-                styles.letterCell,
-                index === SINGLE_DAY_LETTERS.length - 1 && styles.letterCellLast,
-                selectedDayIndex === index && styles.letterCellSelected,
+                navStyles.letterCell,
+                index === DAY_LETTERS.length - 1 && navStyles.letterCellLast,
+                selectedDayIndex === index && navStyles.letterCellSelected,
               ]}
             >
               <Text
                 style={[
-                  styles.letterText,
-                  selectedDayIndex === index && styles.letterTextSelected,
+                  styles.dayText,
+                  selectedDayIndex === index && styles.dayTextSelected,
                 ]}
                 numberOfLines={1}
                 adjustsFontSizeToFit
-                minimumFontScale={0.75}
+                minimumFontScale={0.55}
               >
-                {letter}
+                {dayName}
               </Text>
             </Pressable>
           ))}
         </View>
-        <TouchableOpacity style={styles.arrowCell} onPress={onNext} hitSlop={8}>
-          <Text style={styles.arrowText}>{'▶'}</Text>
+        <TouchableOpacity style={navStyles.arrowCell} onPress={onNext} hitSlop={8}>
+          <Text style={navStyles.arrowText}>{'▶'}</Text>
         </TouchableOpacity>
       </View>
-    </AgendaNavBar>
+    </View>
   );
 }

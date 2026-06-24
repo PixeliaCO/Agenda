@@ -19,17 +19,20 @@ export function useAgendaNavStyles() {
   return useMemo(() => {
     const f = (n: number) => scaledFontSize(n, fontScale);
     const baseText = { fontFamily: 'PixelOperator', fontWeight: 'normal' as const };
+    const selectorHeight = Math.max(22, Math.round(26 * fontScale));
+    const rowPadH = Math.max(2, Math.round(4 * fontScale));
+    const arrowPadH = Math.max(4, Math.round(6 * fontScale));
     return StyleSheet.create({
       rightWrap: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        paddingHorizontal: 4,
+        paddingHorizontal: rowPadH,
         flex: 1,
         minWidth: 0,
       },
       arrowCell: {
-        paddingHorizontal: 6,
+        paddingHorizontal: arrowPadH,
         alignItems: 'center',
         justifyContent: 'center',
       },
@@ -37,14 +40,14 @@ export function useAgendaNavStyles() {
       selector: {
         flexDirection: 'row',
         alignItems: 'stretch',
-        height: 26,
+        height: selectorHeight,
         borderWidth: 1,
         borderColor: colors.agendaHeaderBorder,
         flex: 1,
         minWidth: 0,
       },
       selectorLabel: {
-        paddingHorizontal: 10,
+        paddingHorizontal: Math.max(6, Math.round(10 * fontScale)),
         alignItems: 'center',
         justifyContent: 'center',
         minWidth: 0,
@@ -57,7 +60,7 @@ export function useAgendaNavStyles() {
       },
       letterCell: {
         flex: 1,
-        paddingHorizontal: 1,
+        paddingHorizontal: Math.max(0, Math.round(1 * fontScale)),
         minWidth: 0,
         alignItems: 'center',
         justifyContent: 'center',
@@ -76,21 +79,22 @@ export function AgendaNavBar({ chipLabel, onChipPress, children, chipStyle }: Ag
   const { colors, fontScale } = usePreferences();
   const styles = useMemo(() => {
     const f = (n: number) => scaledFontSize(n, fontScale);
+    const chipPadH = Math.max(6, Math.round(8 * fontScale));
     return StyleSheet.create({
       header: {
         flexDirection: 'row',
         alignItems: 'stretch',
         justifyContent: 'space-between',
-        minHeight: 32,
+        minHeight: Math.max(28, Math.round(32 * fontScale)),
         backgroundColor: colors.agendaHeaderBg,
         borderBottomWidth: 3,
         borderBottomColor: colors.agendaHeaderRule,
       },
       dateChip: {
         justifyContent: 'center',
-        paddingHorizontal: 10,
+        paddingHorizontal: chipPadH,
         backgroundColor: colors.agendaDateChipBg,
-        maxWidth: '38%',
+        maxWidth: '58%',
         flexShrink: 1,
       },
       dateText: {
@@ -115,7 +119,12 @@ export function AgendaNavBar({ chipLabel, onChipPress, children, chipStyle }: Ag
         style={[styles.dateChip, chipStyle]}
         disabled={!onChipPress}
       >
-        <Text style={styles.dateText} numberOfLines={1}>
+        <Text
+          style={styles.dateText}
+          numberOfLines={1}
+          adjustsFontSizeToFit
+          minimumFontScale={0.65}
+        >
           {chipLabel}
         </Text>
       </Pressable>

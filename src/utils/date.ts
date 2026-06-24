@@ -28,12 +28,17 @@ export function getDayIndexFromDate(dateISO: string): number {
   return day === 0 ? 6 : day - 1;
 }
 
-/** Formatea YYYY-MM-DD a "d Mmm aa" (ej. "8 Ene 26") */
+/** Formatea YYYY-MM-DD a "miércoles 24 junio 2026" */
 const MONTHS_SHORT = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+const MONTHS_LONG = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+const WEEKDAY_LONG = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+
 export function formatDisplayDate(dateISO: string): string {
-  const [y, m, d] = dateISO.split('-').map(Number);
-  const yearShort = String(y).slice(-2);
-  return `${d} ${MONTHS_SHORT[m - 1]} ${yearShort}`;
+  const d = new Date(dateISO + 'T12:00:00');
+  const [y, m, day] = dateISO.split('-').map(Number);
+  const weekday = WEEKDAY_LONG[d.getDay()].toLowerCase();
+  const month = MONTHS_LONG[m - 1].toLowerCase();
+  return `${weekday} ${day} ${month} ${y}`;
 }
 
 function pad2(n: number): string {
@@ -189,8 +194,6 @@ export function time12To24(hour: number, min: number, pm: boolean): string {
 }
 
 /** Nombres de mes para vista de mes */
-const MONTHS_LONG = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
-
 /** Formatea mes y año para cabecera de vista mes: "Marzo 2026" */
 export function formatMonthYearLong(date: Date): string {
   return `${MONTHS_LONG[date.getMonth()]} ${date.getFullYear()}`;
@@ -200,8 +203,6 @@ export function formatMonthYearLong(date: Date): string {
 export function formatMonthYearChip(date: Date): string {
   return `${MONTHS_SHORT[date.getMonth()]} ${String(date.getFullYear()).slice(-2)}`;
 }
-
-const WEEKDAY_LONG = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
 
 /** Fecha completa para detalles: "Viernes, 13 de marzo de 2026" */
 export function formatDateFull(dateISO: string): string {
