@@ -25,20 +25,11 @@ async function performFirstLaunchPermissions(): Promise<void> {
     sound: true,
   });
 
-  if (Platform.Version >= 31) {
-    try {
-      const IntentLauncher = await import('expo-intent-launcher');
-      const Constants = (await import('expo-constants')).default;
-      const pkg = Constants.expoConfig?.android?.package;
-      if (pkg) {
-        await IntentLauncher.startActivityAsync(
-          IntentLauncher.ActivityAction.REQUEST_SCHEDULE_EXACT_ALARM,
-          { data: `package:${pkg}` }
-        );
-      }
-    } catch {
-      /* actividad no disponible en algunos entornos */
-    }
+  try {
+    const { ensureAlarmLaunchPermissions } = await import('./localNotificationService');
+    await ensureAlarmLaunchPermissions({ force: true });
+  } catch {
+    /* */
   }
 
   await AsyncStorage.setItem(STORAGE_KEY, 'true');

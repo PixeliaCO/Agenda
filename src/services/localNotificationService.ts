@@ -12,10 +12,10 @@ import type {
   TimestampTrigger,
 } from "@notifee/react-native";
 import {
+  AppState,
   DeviceEventEmitter,
   NativeModules,
   Platform,
-  AppState,
   type EmitterSubscription,
 } from "react-native";
 import type { Reminder } from "../types/reminder";
@@ -63,16 +63,6 @@ export const REMINDER_DELETED_FROM_NOTIFICATION = "agenda:reminder-deleted";
 export const REMINDER_RESCHEDULE_FROM_NOTIFICATION =
   "agenda:reminder-reschedule";
 
-/** Muestra la pantalla de alarma Palm a pantalla completa (app en primer plano). */
-export const ALARM_RING_DISPLAY = "agenda:alarm-ring-display";
-
-/** Cierra la pantalla de alarma Palm tras una acción del usuario o del aviso del sistema. */
-export const ALARM_RING_DISMISSED = "agenda:alarm-ring-dismissed";
-
-export type AlarmRingDisplayPayload = {
-  notification: Notification;
-};
-
 /** Si "Reprogramar" llega antes de que la UI monte el listener (arranque en frío), se guarda aquí. */
 let pendingRescheduleReminderId: string | null = null;
 
@@ -102,10 +92,9 @@ const ANDROID_CHANNEL_ANTICIPATION = "agenda-anticipation-phone-v5";
 const ANDROID_CHANNEL_EVENT_START = "agenda-event-phone-v5";
 
 const MAX_DATE_TRIGGERS = 32;
-/** Notifee exige cantidad par de valores positivos; `[0, 400, …]` falla y degrada a notificación normal sin alarma. */
-const ALARM_VIBRATION_PATTERN = [400, 200, 400, 200, 400, 200];
 const ANDROID_EXACT_ALARM_PROMPT_KEY =
   "agenda_android_exact_alarm_settings_prompt_v1";
+const ANDROID_FSI_PROMPT_KEY = "agenda_android_fsi_settings_prompt_v1";
 /** "Mostrar sobre otras apps": permite que la alarma abra la pantalla completa estando en otra app (desbloqueado). */
 const ANDROID_OVERLAY_PROMPT_KEY = "agenda_android_overlay_settings_prompt_v1";
 const ANDROID_SETTINGS_MANAGE_OVERLAY =
@@ -297,6 +286,21 @@ export async function androidCanDrawOverlays(): Promise<boolean> {
   }
 }
 
+/** Android 14+: ¿puede la app usar fullScreenIntent para alarmas? */
+export async function androidCanUseFullScreenIntent(): Promise<boolean> {
+  if (Platform.OS !== "android") return false;
+  if (androidApiLevel() < 34) return true;
+  const mod = NativeModules.AgendaAlarmNative as
+    | { canUseFullScreenIntent?: () => Promise<boolean> }
+    | undefined;
+  if (typeof mod?.canUseFullScreenIntent !== "function") return true;
+  try {
+    return await mod.canUseFullScreenIntent();
+  } catch {
+    return false;
+  }
+}
+
 export async function openAndroidOverlayPermissionSettings(): Promise<void> {
   if (Platform.OS !== "android") return;
   const pkg = getAndroidPackageName();
@@ -310,38 +314,66 @@ export async function openAndroidOverlayPermissionSettings(): Promise<void> {
   }
 }
 
-/** Una sola vez: si falta "Mostrar sobre otras apps", abrir Ajustes para que la alarma pueda aparecer sobre otras apps. */
-async function maybeOpenAndroidOverlaySettingsOnce(): Promise<void> {
-  if (Platform.OS !== "android") return;
-  try {
-    const done = await AsyncStorage.getItem(ANDROID_OVERLAY_PROMPT_KEY);
-    if (done === "1") return;
-    if (await androidCanDrawOverlays()) {
-      await AsyncStorage.setItem(ANDROID_OVERLAY_PROMPT_KEY, "1");
-      return;
-    }
-    await openAndroidOverlayPermissionSettings();
-    await AsyncStorage.setItem(ANDROID_OVERLAY_PROMPT_KEY, "1");
-  } catch {
-    /* */
+/** Una sola vez por sesión: evita abrir Ajustes en bucle si el usuario vuelve sin conceder. */
+let alarmLaunchPermissionsPromptedThisSession = false;
+
+/**
+ * Comprueba y pide permisos para que la Lock Screen se abra sola (sin tocar el banner).
+ * Overlay = obligatorio con pantalla desbloqueada; FSI = pantalla bloqueada (API 34+).
+ */
+export async function ensureAlarmLaunchPermissions(options?: {
+  force?: boolean;
+}): Promise<{ overlay: boolean; fsi: boolean }> {
+  const overlay = await androidCanDrawOverlays();
+  const fsi = await androidCanUseFullScreenIntent();
+  const api = androidApiLevel();
+
+  if (!options?.force && alarmLaunchPermissionsPromptedThisSession) {
+    return { overlay, fsi };
   }
+
+  let opened = false;
+  if (api >= 34 && !fsi) {
+    await openAndroidManageFullScreenIntentSettings();
+    opened = true;
+  }
+  if (!overlay) {
+    await openAndroidOverlayPermissionSettings();
+    opened = true;
+  }
+
+  if (opened) {
+    alarmLaunchPermissionsPromptedThisSession = true;
+  }
+
+  const overlayAfter = await androidCanDrawOverlays();
+  const fsiAfter = await androidCanUseFullScreenIntent();
+  return { overlay: overlayAfter, fsi: fsiAfter };
+}
+
+/** @deprecated Usar ensureAlarmLaunchPermissions */
+async function ensureAlarmLaunchPermissionsOnce(): Promise<void> {
+  await ensureAlarmLaunchPermissions();
 }
 
 async function maybeOpenAndroidExactAlarmSettingsOnce(): Promise<void> {
-  if (Platform.OS !== "android") return;
+  if (Platform.OS !== "android" || !notifee) return;
   const api = androidApiLevel();
   if (api < 31) return;
   try {
+    const settings = await notifee.getNotificationSettings();
+    const alarm = settings.android.alarm;
+    // USE_EXACT_ALARM en manifest → suele estar ENABLED o NOT_SUPPORTED; no abrir Ajustes inútiles.
+    if (
+      alarm === AndroidNotificationSetting.ENABLED ||
+      alarm === AndroidNotificationSetting.NOT_SUPPORTED
+    ) {
+      await AsyncStorage.setItem(ANDROID_EXACT_ALARM_PROMPT_KEY, "1");
+      return;
+    }
     const done = await AsyncStorage.getItem(ANDROID_EXACT_ALARM_PROMPT_KEY);
     if (done === "1") return;
-    const pkg = getAndroidPackageName();
-    if (!pkg) return;
-    await IntentLauncher.startActivityAsync(
-      IntentLauncher.ActivityAction.REQUEST_SCHEDULE_EXACT_ALARM,
-      {
-        data: `package:${pkg}`,
-      },
-    );
+    await openAndroidExactAlarmPermissionSettings();
     await AsyncStorage.setItem(ANDROID_EXACT_ALARM_PROMPT_KEY, "1");
   } catch {
     /* */
@@ -385,6 +417,112 @@ function getAlarmLockscreenLaunchActivity(): string | undefined {
   return `${pkg}.AlarmLockscreenActivity`;
 }
 
+/** Hora compacta para el banner de alarma (ej. "1:41"). */
+function alarmBannerTime(startTime: string): string {
+  const parts = startTime.split(":");
+  let h = parseInt(parts[0] ?? "0", 10);
+  const m = parseInt(parts[1] ?? "0", 10);
+  if (!Number.isFinite(h)) h = 0;
+  if (h === 0) h = 12;
+  else if (h > 12) h -= 12;
+  return `${h}:${String(Number.isFinite(m) ? m : 0).padStart(2, "0")}`;
+}
+
+function startNativeAlarmSound(): void {
+  if (Platform.OS !== "android") return;
+  try {
+    const mod = NativeModules.AgendaAlarmNative as
+      | { startAlarmSound?: () => void }
+      | undefined;
+    const hasMod = typeof mod?.startAlarmSound === "function";
+    if (hasMod) mod!.startAlarmSound!();
+  } catch {
+    /* */
+  }
+}
+
+function stopNativeAlarmSound(): void {
+  if (Platform.OS !== "android") return;
+  try {
+    const mod = NativeModules.AgendaAlarmNative as
+      | { stopAlarmSound?: () => void }
+      | undefined;
+    mod?.stopAlarmSound?.();
+  } catch {
+    /* */
+  }
+}
+
+/** Color de acento del banner (reloj azul como alarma del sistema). */
+const ALARM_BANNER_ACCENT = "#1332F6";
+
+/** Acciones del banner: icono + etiqueta corta (Android 12+ no muestra solo iconos). */
+function buildAlarmBannerActions(): NonNullable<
+  Notification["android"]
+>["actions"] {
+  return [
+    {
+      title: "Posponer",
+      icon: "ic_agenda_snooze",
+      pressAction: { id: ACTION_POSPONER },
+    },
+    {
+      title: "Detener",
+      icon: "ic_agenda_stop",
+      pressAction: { id: ACTION_OK },
+    },
+  ];
+}
+
+function alarmBannerAndroidBase(
+  channelId: string,
+  lockLa: string | undefined,
+  fullScreenId: string,
+): NonNullable<Notification["android"]> {
+  return {
+    channelId,
+    smallIcon: "ic_agenda_alarm",
+    largeIcon: "ic_agenda_alarm",
+    color: ALARM_BANNER_ACCENT,
+    category: AndroidCategory.ALARM,
+    ongoing: true,
+    autoCancel: false,
+    visibility: AndroidVisibility.PUBLIC,
+    importance: AndroidImportance.HIGH,
+    pressAction: lockLa
+      ? { id: ACTION_DEFAULT_PRESS, launchActivity: lockLa }
+      : { id: ACTION_DEFAULT_PRESS, launchActivity: "default" },
+    fullScreenAction: lockLa
+      ? { id: fullScreenId, launchActivity: lockLa }
+      : { id: fullScreenId, launchActivity: "default" },
+    lightUpScreen: true,
+    actions: buildAlarmBannerActions(),
+    localOnly: true,
+  };
+}
+
+async function androidIsScreenInteractive(): Promise<boolean> {
+  if (Platform.OS !== "android") return true;
+  const mod = NativeModules.AgendaAlarmNative as
+    | { isScreenInteractive?: () => Promise<boolean> }
+    | undefined;
+  if (typeof mod?.isScreenInteractive !== "function") return true;
+  try {
+    return await mod.isScreenInteractive();
+  } catch {
+    return true;
+  }
+}
+
+async function hideAlarmBannerNotification(notifId: string): Promise<void> {
+  if (!notifee) return;
+  try {
+    await notifee.cancelNotification(notifId);
+  } catch {
+    /* */
+  }
+}
+
 function alarmKindFromNotificationData(
   n: Notification,
 ): "anticipation" | "start" {
@@ -423,29 +561,83 @@ function primeNativeLockScreenPayload(
 
 let lastLockScreenPresentedId: string | null = null;
 let lastLockScreenPresentedAt = 0;
+let lockScreenPresentInFlight = false;
+/** Evita OK automático al cancelar Notifee para mostrar banner nativo. */
+let suppressNextDismissedForNativeBanner = false;
+
+async function presentNativeAlarmHeadsUpBanner(
+  notification: Notification,
+  reminder: Reminder,
+): Promise<void> {
+  if (Platform.OS !== "android" || !notification.id) return;
+  const mod = NativeModules.AgendaAlarmNative as
+    | {
+        showAlarmHeadsUpBanner?: (
+          id: string,
+          time: string,
+          payload: string,
+        ) => void;
+      }
+    | undefined;
+  if (typeof mod?.showAlarmHeadsUpBanner !== "function") return;
+
+  const kind = alarmKindFromNotificationData(notification);
+  const p = payloadFromReminder(reminder, kind);
+  const payload = {
+    ...p,
+    channelId:
+      kind === "anticipation"
+        ? ANDROID_CHANNEL_ANTICIPATION
+        : ANDROID_CHANNEL_EVENT_START,
+    notificationId: notification.id,
+  };
+
+  suppressNextDismissedForNativeBanner = true;
+  try {
+    await notifee?.cancelNotification(notification.id);
+  } catch {
+    suppressNextDismissedForNativeBanner = false;
+  }
+
+  try {
+    mod.showAlarmHeadsUpBanner(
+      notification.id,
+      alarmBannerTime(reminder.startTime),
+      JSON.stringify(payload),
+    );
+  } catch {
+    /* */
+  }
+}
+
+async function dismissNativeAlarmHeadsUpBanner(notifId: string): Promise<void> {
+  if (Platform.OS !== "android") return;
+  const mod = NativeModules.AgendaAlarmNative as
+    | { dismissAlarmHeadsUpBanner?: (id: string) => void }
+    | undefined;
+  try {
+    mod?.dismissAlarmHeadsUpBanner?.(notifId);
+  } catch {
+    /* */
+  }
+}
 
 function isAlarmKindNotification(n: Notification | undefined): boolean {
   const k = n?.data?.alarmKind;
   return k === "start" || k === "anticipation";
 }
 
-function emitAlarmRingDisplay(notification: Notification): void {
-  DeviceEventEmitter.emit(ALARM_RING_DISPLAY, {
-    notification,
-  } satisfies AlarmRingDisplayPayload);
-}
-
-function emitAlarmRingDismissed(notificationId: string | undefined): void {
-  if (!notificationId) return;
-  DeviceEventEmitter.emit(ALARM_RING_DISMISSED, { notificationId });
-}
-
-/** Si fullScreenIntent está bloqueado, abrir AlarmLockscreenActivity al entregar la notificación. */
+/**
+ * Abre AlarmLockscreenActivity al dispararse la alarma.
+ * Siempre vía módulo nativo (PendingIntent + MODE_BACKGROUND_ACTIVITY_START_ALLOWED en API 34+).
+ * NO usar displayNotification aquí: provoca un segundo DELIVERED y doble sonido (evidencia en logs).
+ */
 async function presentAlarmLockScreenIfNeeded(
   notification: Notification | undefined,
 ): Promise<void> {
   if (!isAndroidNotifications() || !notification?.id) return;
   if (!isAlarmKindNotification(notification)) return;
+  if (lockScreenPresentInFlight) return;
 
   const now = Date.now();
   if (
@@ -456,46 +648,48 @@ async function presentAlarmLockScreenIfNeeded(
   }
 
   const reminderId = notification.data?.reminderId;
-  if (typeof reminderId === "string") {
-    const r = await getReminderById(reminderId);
-    if (r) {
-      const behavior = await getAlarmBehaviorSettings();
-      primeNativeLockScreenPayload(r, notification, behavior.snoozeMinutes);
-    }
-  }
+  if (typeof reminderId !== "string") return;
 
-  const foreground = AppState.currentState === "active";
-  if (foreground) {
-    emitAlarmRingDisplay(notification);
-    lastLockScreenPresentedId = notification.id;
-    lastLockScreenPresentedAt = now;
-    return;
-  }
-
-  const mod = NativeModules.AgendaAlarmNative as
-    | {
-        primeLockScreenPayload?: (id: string, json: string) => void;
-        launchLockScreenActivity?: () => void;
-      }
-    | undefined;
-  if (typeof mod?.launchLockScreenActivity !== "function") {
-    return;
-  }
-
+  lockScreenPresentInFlight = true;
   try {
-    mod.launchLockScreenActivity();
+    const [r, screenOn] = await Promise.all([
+      getReminderById(reminderId),
+      androidIsScreenInteractive(),
+    ]);
+    if (!r) return;
+
+    const behavior = await getAlarmBehaviorSettings();
+    primeNativeLockScreenPayload(r, notification, behavior.snoozeMinutes);
+
+    startNativeAlarmSound();
+
+    if (!screenOn) {
+      const mod = NativeModules.AgendaAlarmNative as
+        | { launchLockScreenActivity?: () => void }
+        | undefined;
+      if (typeof mod?.launchLockScreenActivity === "function") {
+        mod.launchLockScreenActivity();
+      }
+      await hideAlarmBannerNotification(notification.id);
+      await dismissNativeAlarmHeadsUpBanner(notification.id);
+      lastLockScreenPresentedId = notification.id;
+      lastLockScreenPresentedAt = now;
+      return;
+    }
+
+    // Pantalla encendida: banner nativo con iconos circulares.
+    await presentNativeAlarmHeadsUpBanner(notification, r);
     lastLockScreenPresentedId = notification.id;
     lastLockScreenPresentedAt = now;
-  } catch {
-    /* */
+  } finally {
+    lockScreenPresentInFlight = false;
   }
 }
 
-async function handleNativeAlarmBridge(ev: unknown): Promise<void> {
-  if (!isAndroidNotifications()) return;
-  if (isExpoGoEnvironment()) return;
-  await initLocalNotifications();
-  const o = ev as Partial<NativeAlarmBridgePayload>;
+/** Convierte un objeto del puente nativo en `handleAlarmInteraction` (sin reinit; reutilizable). */
+async function dispatchNativeAlarmAction(
+  o: Partial<NativeAlarmBridgePayload>,
+): Promise<void> {
   const actionRaw = o.action;
   const reminderId = o.reminderId;
   const alarmKind = o.alarmKind;
@@ -527,6 +721,35 @@ async function handleNativeAlarmBridge(ev: unknown): Promise<void> {
     }),
   };
   await handleAlarmInteraction(actionId, notification);
+}
+
+async function handleNativeAlarmBridge(ev: unknown): Promise<void> {
+  if (!isAndroidNotifications()) return;
+  if (isExpoGoEnvironment()) return;
+  await initLocalNotifications();
+  await dispatchNativeAlarmAction(ev as Partial<NativeAlarmBridgePayload>);
+}
+
+/**
+ * Drena las acciones (Completar/Posponer) que la Lock Screen no pudo entregar a JS en vivo. Se
+ * llama una vez durante el init, ya dentro del flujo de init: NO debe reinvocar `initLocalNotifications`.
+ */
+async function drainPendingAlarmActions(): Promise<void> {
+  if (!isAndroidNotifications() || isExpoGoEnvironment()) return;
+  const mod = NativeModules.AgendaAlarmNative as
+    | { consumePendingAlarmActions?: () => Promise<string> }
+    | undefined;
+  if (typeof mod?.consumePendingAlarmActions !== "function") return;
+  try {
+    const raw = await mod.consumePendingAlarmActions();
+    const list = JSON.parse(raw) as Array<Partial<NativeAlarmBridgePayload>>;
+    if (!Array.isArray(list)) return;
+    for (const o of list) {
+      await dispatchNativeAlarmAction(o);
+    }
+  } catch {
+    /* */
+  }
 }
 
 /** Registra el listener del puente nativo lo antes posible (p. ej. desde `index.ts`) para no perder eventos al arranque en frío. */
@@ -586,12 +809,26 @@ function isAlarmAction(actionId: string): boolean {
   );
 }
 
-async function dismissByNotificationId(
+/**
+ * Cierra por completo una alarma por id: notificación mostrada, notificación normal y el propio
+ * disparador. Así la ocurrencia que suena no puede reabrir la Lock Screen tras Completar/Posponer.
+ */
+async function dismissAlarmNotification(
   notificationId: string | undefined,
 ): Promise<void> {
   if (!notificationId) return;
   try {
+    await notifee.cancelDisplayedNotification(notificationId);
+  } catch {
+    /* */
+  }
+  try {
     await notifee.cancelNotification(notificationId);
+  } catch {
+    /* */
+  }
+  try {
+    await notifee.cancelTriggerNotification(notificationId);
   } catch {
     /* */
   }
@@ -636,14 +873,97 @@ async function recordAckFromPayload(
   );
 }
 
+/** Pospuesta con id estable por (recordatorio, tipo): re-posponer reemplaza, nunca acumula. */
+function postponeIdFor(
+  reminderId: string,
+  kind: "start" | "anticipation",
+): string {
+  return kind === "start" ? `agenda-p-${reminderId}` : `agenda-ap-${reminderId}`;
+}
+
+/** Alarma "principal" de un evento: inicio/anticipación originales, no re-sonidos ni pospuestas. */
+function isMainAlarmIdentifier(id: string): boolean {
+  if (id.includes("-ring")) return false;
+  if (id.startsWith("agenda-p-") || id.startsWith("agenda-ap-")) return false;
+  return id.startsWith("agenda-s-") || id.startsWith("agenda-a-");
+}
+
+/**
+ * ¿Ya hay una alarma PRINCIPAL (de cualquier evento) a ±30 s de `whenMs`? Si la hay, la pospuesta no
+ * se programa para no sonar a la vez que la original; se ignoran re-sonidos y pospuestas previas.
+ */
+async function hasScheduledAlarmNear(
+  whenMs: number,
+  toleranceMs = 30_000,
+): Promise<boolean> {
+  try {
+    const triggers = await notifee.getTriggerNotifications();
+    for (const t of triggers) {
+      const tid = t.notification.id;
+      if (!tid || !isMainAlarmIdentifier(tid)) continue;
+      const trig = t.trigger as { timestamp?: number } | undefined;
+      const ts = typeof trig?.timestamp === "number" ? trig.timestamp : undefined;
+      if (ts != null && Math.abs(ts - whenMs) <= toleranceMs) return true;
+    }
+  } catch {
+    /* */
+  }
+  return false;
+}
+
+/** Cancela cualquier pospuesta previa del recordatorio (ambos tipos) para no acumular. */
+async function cancelExistingPostpones(reminderId: string): Promise<void> {
+  try {
+    const triggers = await notifee.getTriggerNotifications();
+    for (const t of triggers) {
+      const tid = t.notification.id;
+      if (!tid) continue;
+      if (
+        tid.startsWith(`agenda-p-${reminderId}`) ||
+        tid.startsWith(`agenda-ap-${reminderId}`)
+      ) {
+        await notifee.cancelTriggerNotification(tid);
+      }
+    }
+  } catch {
+    /* */
+  }
+}
+
+/**
+ * Posponer +N min: una sola pospuesta activa (id estable) y nunca dos alarmas a la vez.
+ * Si ya hay una alarma a esa hora (este u otro evento), no se crea: suena solo la original.
+ */
+async function schedulePostpone(
+  reminder: Reminder,
+  kind: "start" | "anticipation",
+  whenMs: number,
+): Promise<void> {
+  await cancelExistingPostpones(reminder.id);
+  if (await hasScheduledAlarmNear(whenMs)) return;
+  const id = postponeIdFor(reminder.id, kind);
+  const notification =
+    kind === "start"
+      ? buildStartNotification(reminder, id, { includeActions: true })
+      : buildAnticipationNotification(reminder, id, { includeActions: true });
+  await scheduleTrigger(
+    reminder,
+    id,
+    {
+      type: TriggerType.TIMESTAMP,
+      timestamp: whenMs,
+      alarmManager: { type: AlarmType.SET_ALARM_CLOCK },
+    },
+    notification,
+  );
+}
+
 async function handleAlarmInteraction(
   actionId: string,
   notification: Notification | undefined,
 ): Promise<void> {
   const id = normalizeActionId(actionId);
   if (!isAlarmAction(id)) return;
-
-  emitAlarmRingDismissed(notification?.id);
 
   const payload = parseAlarmPayload(
     notification?.data as Record<string, unknown> | undefined,
@@ -655,7 +975,25 @@ async function handleAlarmInteraction(
   const isReprogramar = id === ACTION_REPROGRAMAR;
   const isEliminar = id === ACTION_ELIMINAR;
   const isPosponer = id === ACTION_POSPONER;
-  const isDismissOnly = id === ACTION_DETENER || id === ACTION_DEFAULT_PRESS;
+  const isDismissOnly =
+    id === ACTION_DETENER ||
+    (id === ACTION_DEFAULT_PRESS && !isAlarmKindNotification(notification));
+
+  if (
+    isCompletado ||
+    isPosponer ||
+    isReprogramar ||
+    isEliminar ||
+    isDismissOnly
+  ) {
+    stopNativeAlarmSound();
+  }
+
+  /** Tocar el banner → Lock Screen (el sonido ya está activo). */
+  if (payload && id === ACTION_DEFAULT_PRESS && isAlarmKindNotification(notification)) {
+    await presentAlarmLockScreenIfNeeded(notification);
+    return;
+  }
 
   /**
    * Completar / descartar: solo la ocurrencia que suena ahora. Detiene el sonido (cierra la notificación),
@@ -663,8 +1001,12 @@ async function handleAlarmInteraction(
    * El ack (marca de completada) solo aplica al inicio; la anticipación no debe suprimir el evento.
    */
   if (payload && (isCompletado || isDismissOnly)) {
-    await dismissByNotificationId(nid);
+    await dismissAlarmNotification(nid);
     await cancelOccurrenceRings(payload.reminderId, payload.alarmKind);
+    // Completar también descarta cualquier pospuesta pendiente del mismo recordatorio.
+    if (isCompletado) {
+      await cancelExistingPostpones(payload.reminderId);
+    }
     if (isCompletado && payload.alarmKind === "start") {
       await recordAckFromPayload(payload, "completed");
     }
@@ -679,7 +1021,7 @@ async function handleAlarmInteraction(
     DeviceEventEmitter.emit(REMINDER_RESCHEDULE_FROM_NOTIFICATION, {
       reminderId: payload.reminderId,
     });
-    await dismissByNotificationId(nid);
+    await dismissAlarmNotification(nid);
     return;
   }
 
@@ -691,35 +1033,17 @@ async function handleAlarmInteraction(
       DeviceEventEmitter.emit(REMINDER_DELETED_FROM_NOTIFICATION, {
         reminderId: payload.reminderId,
       });
-      await dismissByNotificationId(nid);
+      await dismissAlarmNotification(nid);
       return;
     }
     if (isPosponer) {
-      // Solo la ocurrencia actual: detener sonido + cortar sus re-sonidos y agendar uno nuevo a +5 min.
-      await dismissByNotificationId(nid);
+      // Solo la ocurrencia actual: cortar sus re-sonidos y agendar una única pospuesta a +N min.
+      await dismissAlarmNotification(nid);
       await cancelOccurrenceRings(payload.reminderId, "anticipation");
       const r = await getReminderById(payload.reminderId);
       if (r && !r.noTime) {
         try {
-          const when = new Date(Date.now() + behavior.snoozeMs);
-          // Si el pospuesto caería en o después del inicio del evento, no crear otra alarma:
-          // la alarma de inicio ya sonará a esa hora (una sola alerta, sin duplicar).
-          const occStart = eventStartLocal({ ...r, date: payload.dateSnapshot });
-          if (when.getTime() < occStart.getTime()) {
-            const postponeAntId = `agenda-ap-${r.id}-${Date.now()}`;
-            await scheduleTrigger(
-              r,
-              postponeAntId,
-              {
-                type: TriggerType.TIMESTAMP,
-                timestamp: when.getTime(),
-                alarmManager: { type: AlarmType.SET_ALARM_CLOCK },
-              },
-              buildAnticipationNotification(r, postponeAntId, {
-                includeActions: true,
-              }),
-            );
-          }
+          await schedulePostpone(r, "anticipation", Date.now() + behavior.snoozeMs);
         } catch (e) {
           console.warn("[Agenda] Error al posponer anticipación", e);
         }
@@ -738,48 +1062,24 @@ async function handleAlarmInteraction(
     DeviceEventEmitter.emit(REMINDER_DELETED_FROM_NOTIFICATION, {
       reminderId: payload.reminderId,
     });
-    await dismissByNotificationId(nid);
+    await dismissAlarmNotification(nid);
     return;
   }
 
   if (isPosponer) {
-    // Solo la ocurrencia actual: detener sonido + cortar sus re-sonidos y agendar uno nuevo a +5 min.
-    await dismissByNotificationId(nid);
+    // Solo la ocurrencia actual: cortar sus re-sonidos y agendar una única pospuesta a +N min.
+    await dismissAlarmNotification(nid);
     await cancelOccurrenceRings(payload.reminderId, "start");
     const r = await getReminderById(payload.reminderId);
     if (r && !r.noTime) {
       try {
-        const when = new Date(Date.now() + behavior.snoozeMs);
-        const postponeId = `agenda-p-${r.id}-${Date.now()}`;
-        await scheduleTrigger(
-          r,
-          postponeId,
-          {
-            type: TriggerType.TIMESTAMP,
-            timestamp: when.getTime(),
-            alarmManager: { type: AlarmType.SET_ALARM_CLOCK },
-          },
-          buildStartNotification(r, postponeId, { includeActions: true }),
-        );
+        await schedulePostpone(r, "start", Date.now() + behavior.snoozeMs);
       } catch (e) {
         console.warn("[Agenda] Error al posponer alarma de inicio", e);
       }
     }
     return;
   }
-}
-
-/** Acciones desde la pantalla de alarma Palm (Completado / posponer / reprogramar). */
-export async function processAlarmRingUserAction(
-  action: "complete" | "snooze" | "reschedule",
-  notification: Notification | undefined,
-): Promise<void> {
-  const map = {
-    complete: ACTION_OK,
-    snooze: ACTION_POSPONER,
-    reschedule: ACTION_REPROGRAMAR,
-  } as const;
-  await handleAlarmInteraction(map[action], notification);
 }
 
 /**
@@ -808,7 +1108,10 @@ export async function handleNotifeeBackgroundEvent(
   }
 
   if (type === EventType.DISMISSED && notification) {
-    // El ack lo registra handleAlarmInteraction según el tipo (solo inicio; la anticipación no debe suprimir el evento).
+    if (suppressNextDismissedForNativeBanner) {
+      suppressNextDismissedForNativeBanner = false;
+      return;
+    }
     await handleAlarmInteraction(ACTION_OK, notification);
   }
 }
@@ -1011,22 +1314,15 @@ function stripActionsOnly(n: Notification): Notification {
 }
 
 /**
- * Refuerzo de despertar / alarma: sonido insistente, tono en bucle, timestamp visible.
- * En API menores a 26 fuerza importancia alta (sin canales).
+ * Refuerzo de despertar: timestamp visible. El sonido NO sale de la notificación
+ * (canal silencioso); lo reproduce AlarmLockscreenActivity. En API < 26 fuerza importancia alta.
  */
 function withAlarmWakeBoost(n: Notification, fireAtMs?: number): Notification {
   const a = n.android ? { ...n.android } : undefined;
   if (!a) return n;
-  const prevFlags = a.flags ?? [];
-  const merged = [...prevFlags];
-  if (!merged.includes(AndroidFlags.FLAG_INSISTENT)) {
-    merged.push(AndroidFlags.FLAG_INSISTENT);
-  }
   const api = androidApiLevel();
   const next: Notification["android"] = {
     ...a,
-    flags: merged,
-    loopSound: true,
     ...(api > 0 && api < 26 ? { importance: AndroidImportance.HIGH } : {}),
     ...(typeof fireAtMs === "number" && fireAtMs > 0
       ? { showTimestamp: true, timestamp: fireAtMs }
@@ -1091,110 +1387,49 @@ function notificationAuthorized(settings: {
 
 type BuildNotifOpts = { includeActions?: boolean };
 
+/**
+ * Banner estilo alarma del sistema: hora + "Alarma", iconos posponer/detener.
+ * Pantalla apagada → se oculta y solo queda Lock Screen.
+ */
 function buildAnticipationNotification(
   reminder: Reminder,
   id: string,
-  opts?: BuildNotifOpts,
+  _opts?: BuildNotifOpts,
 ): Notification {
+  void _opts;
   const lockLa = getAlarmLockscreenLaunchActivity();
-  const when = reminder.allDay
-    ? `todo el día · ${formatTime12h(reminder.startTime)}`
-    : formatTime12h(reminder.startTime);
   const p = payloadFromReminder(reminder, "anticipation");
-  const body = `Recordatorio antes del inicio · ${when}`;
-  const base: Notification = {
+  return {
     id,
-    title: reminder.title?.trim() || "Evento",
-    body,
+    title: alarmBannerTime(reminder.startTime),
+    body: "Alarma",
     data: toDataStrings(p),
-    android: {
-      channelId: ANDROID_CHANNEL_ANTICIPATION,
-      category: AndroidCategory.ALARM,
-      /** Hasta que el usuario pulse Ok (u otra acción); no afecta "Limpiar todo" y suele impedir el cierre con X. */
-      ongoing: true,
-      autoCancel: false,
-      visibility: AndroidVisibility.PUBLIC,
-      pressAction: lockLa
-        ? { id: ACTION_DEFAULT_PRESS, launchActivity: lockLa }
-        : { id: ACTION_DEFAULT_PRESS, launchActivity: "default" },
-      fullScreenAction: lockLa
-        ? { id: "agenda_fs_anticipation", launchActivity: lockLa }
-        : { id: "agenda_fs_anticipation", launchActivity: "default" },
-      vibrationPattern: ALARM_VIBRATION_PATTERN,
-      lights: ["#00FFFF", 300, 300],
-      lightUpScreen: true,
-      ...(opts?.includeActions !== false
-        ? {
-            actions: [
-              { title: "Completado", pressAction: { id: ACTION_OK } },
-              {
-                title: "Reprogramar",
-                pressAction: {
-                  id: ACTION_REPROGRAMAR,
-                  launchActivity: "default",
-                },
-              },
-              {
-                // Sin launchActivity: posponer +5 min en segundo plano, sin abrir la app.
-                title: "Recordar nuevamente",
-                pressAction: { id: ACTION_POSPONER },
-              },
-            ],
-          }
-        : {}),
-    },
+    android: alarmBannerAndroidBase(
+      ANDROID_CHANNEL_ANTICIPATION,
+      lockLa,
+      "agenda_fs_anticipation",
+    ),
   };
-  return base;
 }
 
 function buildStartNotification(
   reminder: Reminder,
   id: string,
-  opts?: BuildNotifOpts,
+  _opts?: BuildNotifOpts,
 ): Notification {
+  void _opts;
   const lockLa = getAlarmLockscreenLaunchActivity();
-  const body = reminder.allDay
-    ? `Todo el día · ${formatTime12h(reminder.startTime)}`
-    : `Empieza ahora · ${formatTime12h(reminder.startTime)}`;
   const p = payloadFromReminder(reminder, "start");
-  const actions =
-    opts?.includeActions === false
-      ? undefined
-      : [
-          { title: "Completado", pressAction: { id: ACTION_OK } },
-          {
-            title: "Reprogramar",
-            pressAction: { id: ACTION_REPROGRAMAR, launchActivity: "default" },
-          },
-          {
-            // Sin launchActivity: posponer +5 min en segundo plano, sin abrir la app.
-            title: "Recordar nuevamente",
-            pressAction: { id: ACTION_POSPONER },
-          },
-        ];
   return {
     id,
-    title: reminder.title?.trim() || "Evento",
-    body,
+    title: alarmBannerTime(reminder.startTime),
+    body: "Alarma",
     data: toDataStrings(p),
-    android: {
-      channelId: ANDROID_CHANNEL_EVENT_START,
-      category: AndroidCategory.ALARM,
-      /** Persistente hasta Ok / Eliminar / Posponer. */
-      ongoing: true,
-      autoCancel: false,
-      visibility: AndroidVisibility.PUBLIC,
-      pressAction: lockLa
-        ? { id: ACTION_DEFAULT_PRESS, launchActivity: lockLa }
-        : { id: ACTION_DEFAULT_PRESS, launchActivity: "default" },
-      fullScreenAction: lockLa
-        ? { id: "agenda_fs", launchActivity: lockLa }
-        : { id: "agenda_fs", launchActivity: "default" },
-      vibrationPattern: ALARM_VIBRATION_PATTERN,
-      lights: ["#00FFFF", 300, 300],
-      lightUpScreen: true,
-      actions,
-    },
+    android: alarmBannerAndroidBase(
+      ANDROID_CHANNEL_EVENT_START,
+      lockLa,
+      "agenda_fs",
+    ),
   };
 }
 
@@ -1260,6 +1495,10 @@ async function performInitLocalNotifications(): Promise<void> {
         return;
       }
       if (type === EventType.DISMISSED && notification) {
+        if (suppressNextDismissedForNativeBanner) {
+          suppressNextDismissedForNativeBanner = false;
+          return;
+        }
         void handleAlarmInteraction(ACTION_OK, notification);
       }
     });
@@ -1306,11 +1545,17 @@ async function performInitLocalNotifications(): Promise<void> {
 
     await ensureNativeAlarmChannelsVisible();
 
+    // Procesa acciones de la Lock Screen que no se entregaron en vivo (sin abrir ninguna otra UI).
+    await drainPendingAlarmActions();
+
+    AppState.addEventListener("change", (next) => {
+      if (next === "active") void drainPendingAlarmActions();
+    });
+
     setTimeout(() => {
       void (async () => {
-        // En secuencia: cada Ajuste resuelve al volver, evitando dos pantallas a la vez.
         await maybeOpenAndroidExactAlarmSettingsOnce();
-        await maybeOpenAndroidOverlaySettingsOnce();
+        await ensureAlarmLaunchPermissionsOnce();
       })();
     }, 2500);
   } catch (e) {
@@ -1718,6 +1963,8 @@ export async function syncReminderNotification(
     );
     return;
   }
+
+  await ensureAlarmLaunchPermissions();
 
   const wantsAnticipation = Boolean(
     reminder.alarm && reminder.alarmOffset != null,

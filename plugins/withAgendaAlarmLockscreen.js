@@ -5,10 +5,111 @@
  */
 const fs = require('fs');
 const path = require('path');
+
+function writeAlarmBannerDrawables(drawableDir) {
+  fs.mkdirSync(drawableDir, { recursive: true });
+  const files = {
+    'ic_agenda_alarm.xml': `<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp"
+    android:viewportWidth="24" android:viewportHeight="24">
+  <path android:fillColor="#1332F6" android:pathData="M12,2C6.48,2 2,6.48 2,12s4.48,10 10,10 10,-4.48 10,-10S17.52,2 12,2zM12.5,6H11v6l5.25,3.15 0.75,-1.23 -4.5,-2.67V6z"/>
+</vector>`,
+    'ic_agenda_snooze.xml': `<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp"
+    android:viewportWidth="24" android:viewportHeight="24">
+  <path android:fillColor="#FFFFFF" android:pathData="M12,4V1L8,5l4,4V6c3.31,0 6,2.69 6,6 0,1.01 -0.25,1.97 -0.7,2.8l1.46,1.46C19.54,15.03 20,13.57 20,12c0,-4.42 -3.58,-8 -8,-8zM12,18c-3.31,0 -6,-2.69 -6,-6 0,-1.01 0.25,-1.97 0.7,-2.8L5.24,7.74C4.46,8.97 4,10.43 4,12c0,4.42 3.58,8 8,8v3l4,-4 -4,-4v3z"/>
+</vector>`,
+    'ic_agenda_stop.xml': `<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp"
+    android:viewportWidth="24" android:viewportHeight="24">
+  <path android:fillColor="#FFFFFF" android:pathData="M6,6h12v12H6z"/>
+</vector>`,
+  };
+  for (const [name, xml] of Object.entries(files)) {
+    fs.writeFileSync(path.join(drawableDir, name), xml, 'utf8');
+  }
+}
 const { withDangerousMod, withAndroidManifest } = require('expo/config-plugins');
 
 function pkgToDir(pkg) {
   return pkg.split('.').join(path.sep);
+}
+
+function makeAlarmSound(packageName) {
+  return `package ${packageName}
+
+import android.content.Context
+import android.media.AudioAttributes
+import android.media.MediaPlayer
+import android.net.Uri
+import android.os.Build
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
+
+/** Sonido/vibración de alarma compartido: banner, Lock Screen y módulo RN. */
+object AgendaAlarmSound {
+  private var alarmPlayer: MediaPlayer? = null
+  private var vibrator: Vibrator? = null
+
+  @Synchronized
+  fun start(ctx: Context) {
+    if (alarmPlayer?.isPlaying == true) return
+    stop(ctx)
+    try {
+      val uri = Uri.parse("android.resource://" + ctx.packageName + "/raw/alert")
+      alarmPlayer = MediaPlayer().apply {
+        setAudioAttributes(
+          AudioAttributes.Builder()
+            .setUsage(AudioAttributes.USAGE_ALARM)
+            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+            .build(),
+        )
+        setDataSource(ctx, uri)
+        isLooping = true
+        prepare()
+        start()
+      }
+    } catch (_: Exception) {
+    }
+    try {
+      val v = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        (ctx.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager).defaultVibrator
+      } else {
+        @Suppress("DEPRECATION")
+        ctx.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+      }
+      vibrator = v
+      val pattern = longArrayOf(0, 600, 700)
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        v.vibrate(VibrationEffect.createWaveform(pattern, 0))
+      } else {
+        @Suppress("DEPRECATION")
+        v.vibrate(pattern, 0)
+      }
+    } catch (_: Exception) {
+    }
+  }
+
+  @Synchronized
+  fun stop(ctx: Context) {
+    try {
+      alarmPlayer?.stop()
+    } catch (_: Exception) {
+    }
+    try {
+      alarmPlayer?.release()
+    } catch (_: Exception) {
+    }
+    alarmPlayer = null
+    try {
+      vibrator?.cancel()
+    } catch (_: Exception) {
+    }
+    vibrator = null
+  }
+}
+`;
 }
 
 function makeMainActivityBridge(packageName) {
@@ -86,8 +187,13 @@ object AgendaAlarmMainActivityBridge {
 function makeNativeModule(packageName) {
   return `package ${packageName}
 
+import android.app.ActivityOptions
+import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.os.Build
+import android.os.PowerManager
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
@@ -119,17 +225,96 @@ class AgendaAlarmNativeModule(reactContext: ReactApplicationContext) :
     }
   }
 
-  /** Fallback cuando el sistema bloquea fullScreenIntent (p. ej. sin permiso FSI en API 34+). */
+  /** ¿Pantalla encendida e interactiva? (false = pantalla apagada → solo Lock Screen). */
+  @ReactMethod
+  fun isScreenInteractive(promise: com.facebook.react.bridge.Promise) {
+    try {
+      val pm = reactApplicationContext.getSystemService(Context.POWER_SERVICE) as PowerManager
+      promise.resolve(pm.isInteractive)
+    } catch (e: Exception) {
+      promise.resolve(true)
+    }
+  }
+
+  /** Lanza AlarmLockscreenActivity; en API 34+ usa PendingIntent con permiso de inicio en background. */
   @ReactMethod
   fun launchLockScreenActivity() {
-    val ctx = reactApplicationContext
+    val ctx = reactApplicationContext.applicationContext
     val intent = Intent(ctx, AlarmLockscreenActivity::class.java)
     intent.addFlags(
       Intent.FLAG_ACTIVITY_NEW_TASK or
         Intent.FLAG_ACTIVITY_CLEAR_TOP or
         Intent.FLAG_ACTIVITY_SINGLE_TOP
     )
-    ctx.startActivity(intent)
+    val piFlags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+    val pi = PendingIntent.getActivity(ctx, 9001, intent, piFlags)
+    try {
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+        val opts = ActivityOptions.makeBasic()
+        opts.setPendingIntentBackgroundActivityStartMode(
+          ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED
+        )
+        pi.send(null, 0, null, null, null, null, opts.toBundle())
+      } else {
+        pi.send()
+      }
+    } catch (_: Exception) {
+      try {
+        ctx.startActivity(intent)
+      } catch (_: Exception) {
+      }
+    }
+  }
+
+  @ReactMethod
+  fun canUseFullScreenIntent(promise: com.facebook.react.bridge.Promise) {
+    try {
+      val ok = if (Build.VERSION.SDK_INT >= 34) {
+        val nm = reactApplicationContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        nm.canUseFullScreenIntent()
+      } else true
+      promise.resolve(ok)
+    } catch (e: Exception) {
+      promise.resolve(false)
+    }
+  }
+
+  /** Reproduce alert.mp3 en bucle (banner sin Lock Screen visible). */
+  @ReactMethod
+  fun showAlarmHeadsUpBanner(notificationId: String, timeText: String, payloadJson: String) {
+    AgendaAlarmHeadsUp.show(reactApplicationContext.applicationContext, notificationId, timeText, payloadJson)
+  }
+
+  @ReactMethod
+  fun dismissAlarmHeadsUpBanner(notificationId: String) {
+    AgendaAlarmHeadsUp.dismiss(reactApplicationContext.applicationContext, notificationId)
+  }
+
+  @ReactMethod
+  fun startAlarmSound() {
+    AgendaAlarmSound.start(reactApplicationContext.applicationContext)
+  }
+
+  @ReactMethod
+  fun stopAlarmSound() {
+    AgendaAlarmSound.stop(reactApplicationContext.applicationContext)
+  }
+
+  /**
+   * Drena las acciones (Completar/Posponer) que la Lock Screen no pudo entregar a JS en vivo, para
+   * procesarlas sin abrir la app. Devuelve un JSON array y limpia la cola.
+   */
+  @ReactMethod
+  fun consumePendingAlarmActions(promise: com.facebook.react.bridge.Promise) {
+    try {
+      val prefs = reactApplicationContext
+        .getSharedPreferences("AgendaAlarmPrefs", Context.MODE_PRIVATE)
+      val raw = prefs.getString("pending_actions", "[]") ?: "[]"
+      prefs.edit().remove("pending_actions").apply()
+      promise.resolve(raw)
+    } catch (e: Exception) {
+      promise.resolve("[]")
+    }
   }
 }
 `;
@@ -159,40 +344,45 @@ function makeLockscreenActivity(packageName) {
   return `package ${packageName}
 
 import android.app.Activity
+import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
+import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
+import android.media.AudioAttributes
+import android.media.MediaPlayer
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import android.view.Gravity
-import android.view.MotionEvent
 import android.view.WindowManager
 import android.widget.Button
 import android.widget.LinearLayout
-import android.widget.TextView
-import android.graphics.Typeface
-import android.graphics.drawable.GradientDrawable
-import android.view.View
 import android.widget.ScrollView
+import android.widget.TextView
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import org.json.JSONObject
 
 class AlarmLockscreenActivity : Activity() {
 
-  private val cHeader = 0xFF1332F6.toInt()
-  private val cHeaderText = 0xFFFFFFFF.toInt()
-  private val cScreen = 0xFFFFFFFF.toInt()
-  private val cText = 0xFF152238.toInt()
-  private val cTextSec = 0xFF4A5F78.toInt()
-  private val cLine = 0xFFC5D4E6.toInt()
-  private val cStrongBorder = 0xFF243B53.toInt()
-  private val cFooterBg = 0xFFC3C3C3.toInt()
-  private val cFooterText = 0xFF1A1A1A.toInt()
-  private val cFooterStroke = 0xFF888888.toInt()
+  // Paleta clara fija: la alarma siempre se ve en tema claro.
+  private val cBgTop = 0xFFEAF1FC.toInt()
+  private val cBgBottom = 0xFFFFFFFF.toInt()
+  private val cBrand = 0xFF1332F6.toInt()
+  private val cBrandSoft = 0xFFE7EDFD.toInt()
+  private val cOnBrand = 0xFFFFFFFF.toInt()
+  private val cTextPrimary = 0xFF152238.toInt()
+  private val cTextSecondary = 0xFF5A6B82.toInt()
+  private val cKicker = 0xFF1332F6.toInt()
+  private val cCardBg = 0xFFFFFFFF.toInt()
+  private val cCardBorder = 0xFFE2E9F4.toInt()
+  private val cSecBorder = 0xFFC5D4E6.toInt()
 
-  private var touchDownY = 0f
-  private val swipeThresholdPx by lazy { 120f * resources.displayMetrics.density }
   private var cpuWakeLock: PowerManager.WakeLock? = null
 
   override fun onCreate(savedInstanceState: Bundle?) {
@@ -207,11 +397,34 @@ class AlarmLockscreenActivity : Activity() {
         WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
         WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD
     )
+    // Barras de sistema en tono claro acorde a la pantalla (iconos oscuros).
+    try {
+      window.statusBarColor = cBgTop
+      window.navigationBarColor = cBgBottom
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+        val decor = window.decorView
+        var flags = decor.systemUiVisibility
+        flags = flags or android.view.View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+          flags = flags or android.view.View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+        }
+        decor.systemUiVisibility = flags
+      }
+    } catch (_: Exception) {
+    }
     try {
       val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
       cpuWakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "${packageName}:AgendaAlarmLockUi")
       cpuWakeLock?.setReferenceCounted(false)
       cpuWakeLock?.acquire(120_000L)
+    } catch (_: Exception) {
+    }
+
+    // Esta Activity es la UNICA interfaz de alarma: reproduce el sonido y descarta cualquier
+    // notificacion para que no haya banner/aviso compitiendo en la cortina.
+    startAlarmFeedback()
+    try {
+      (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).cancelAll()
     } catch (_: Exception) {
     }
 
@@ -231,182 +444,172 @@ class AlarmLockscreenActivity : Activity() {
 
     val root = LinearLayout(this).apply {
       orientation = LinearLayout.VERTICAL
-      setBackgroundColor(cScreen)
+      background = GradientDrawable(
+        GradientDrawable.Orientation.TOP_BOTTOM,
+        intArrayOf(cBgTop, cBgBottom),
+      )
       layoutParams = LinearLayout.LayoutParams(
         LinearLayout.LayoutParams.MATCH_PARENT,
         LinearLayout.LayoutParams.MATCH_PARENT,
       )
-      setOnTouchListener { _, ev ->
-        when (ev.action) {
-          MotionEvent.ACTION_DOWN -> touchDownY = ev.y
-          MotionEvent.ACTION_UP -> {
-            if (touchDownY - ev.y > swipeThresholdPx) {
-              deliverBridge(
-                "OK",
-                reminderId,
-                alarmKind,
-                notificationId,
-                titleSnapshot,
-                startTimeSnapshot,
-                dateSnapshot,
-              )
-              return@setOnTouchListener true
-            }
-          }
-        }
-        false
+    }
+
+    val scroll = ScrollView(this).apply { isFillViewport = true }
+    val content = LinearLayout(this).apply {
+      orientation = LinearLayout.VERTICAL
+      gravity = Gravity.CENTER
+      setPadding(dp(24), dp(40), dp(24), dp(16))
+    }
+
+    // Insignia circular con icono de alarma sobre fondo suave de marca.
+    val badge = TextView(this).apply {
+      text = "⏰"
+      textSize = 30f
+      gravity = Gravity.CENTER
+      background = GradientDrawable().apply {
+        shape = GradientDrawable.OVAL
+        setColor(cBrandSoft)
       }
     }
+    content.addView(
+      badge,
+      LinearLayout.LayoutParams(dp(72), dp(72)).apply { bottomMargin = dp(16) },
+    )
 
-    val header = LinearLayout(this).apply {
-      orientation = LinearLayout.VERTICAL
-      setBackgroundColor(cHeader)
-      setPadding(dp(16), dp(44), dp(16), dp(14))
-    }
-    header.addView(
+    content.addView(
       TextView(this).apply {
-        text = "Alarma"
-        textSize = 12f
-        setTextColor(cHeaderText)
-        alpha = 0.88f
-        letterSpacing = 0.06f
+        text = "ALARMA"
+        textSize = 13f
+        setTextColor(cKicker)
+        letterSpacing = 0.18f
         typeface = Typeface.DEFAULT_BOLD
-        gravity = Gravity.CENTER_HORIZONTAL
+        gravity = Gravity.CENTER
       },
-      LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT),
+      wrap(),
     )
-    header.addView(
+
+    content.addView(
       TextView(this).apply {
-        text = title
-        textSize = 19f
-        setTextColor(cHeaderText)
+        text = timeChip
+        textSize = 54f
+        setTextColor(cTextPrimary)
         typeface = Typeface.DEFAULT_BOLD
-        gravity = Gravity.CENTER_HORIZONTAL
-        setPadding(0, dp(4), 0, 0)
+        gravity = Gravity.CENTER
+        setPadding(0, dp(4), 0, dp(12))
       },
-      LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT),
-    )
-    root.addView(
-      header,
-      LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT),
+      wrap(),
     )
 
-    root.addView(
-      View(this).apply { setBackgroundColor(cHeader) },
-      LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(3)),
+    // Fecha en píldora clara.
+    content.addView(
+      TextView(this).apply {
+        text = dateChip
+        textSize = 14f
+        setTextColor(cBrand)
+        typeface = Typeface.DEFAULT_BOLD
+        gravity = Gravity.CENTER
+        setPadding(dp(16), dp(8), dp(16), dp(8))
+        background = GradientDrawable().apply {
+          setColor(cBrandSoft)
+          cornerRadius = dp(20).toFloat()
+        }
+      },
+      LinearLayout.LayoutParams(
+        LinearLayout.LayoutParams.WRAP_CONTENT,
+        LinearLayout.LayoutParams.WRAP_CONTENT,
+      ).apply { bottomMargin = dp(26) },
     )
-
-    val scroll = ScrollView(this).apply {
-      isFillViewport = true
-      setBackgroundColor(cScreen)
-    }
-    val scrollInner = LinearLayout(this).apply {
-      orientation = LinearLayout.VERTICAL
-      setPadding(dp(16), dp(20), dp(16), dp(12))
-      gravity = Gravity.CENTER_HORIZONTAL
-    }
 
     val card = LinearLayout(this).apply {
       orientation = LinearLayout.VERTICAL
-      setPadding(dp(18), dp(18), dp(18), dp(18))
+      setPadding(dp(22), dp(22), dp(22), dp(22))
+      elevation = dp(6).toFloat()
       background = GradientDrawable().apply {
-        setColor(cScreen)
-        setStroke(dp(2), cStrongBorder)
-        cornerRadius = 0f
+        setColor(cCardBg)
+        cornerRadius = dp(24).toFloat()
+        setStroke(dp(1), cCardBorder)
       }
     }
+    card.addView(
+      TextView(this).apply {
+        text = title
+        textSize = 22f
+        setTextColor(cTextPrimary)
+        typeface = Typeface.DEFAULT_BOLD
+        gravity = Gravity.CENTER
+      },
+      wrap(),
+    )
     card.addView(
       TextView(this).apply {
         text = body
         textSize = 15f
-        setTextColor(cTextSec)
-        gravity = Gravity.CENTER_HORIZONTAL
+        setTextColor(cTextSecondary)
+        gravity = Gravity.CENTER
+        setPadding(0, dp(8), 0, 0)
         setLineSpacing(dp(2).toFloat(), 1f)
       },
-      LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT),
+      wrap(),
     )
-
-    val chipRow = LinearLayout(this).apply {
-      orientation = LinearLayout.HORIZONTAL
-      gravity = Gravity.CENTER_HORIZONTAL
-      setPadding(0, dp(16), 0, dp(4))
-    }
-    chipRow.addView(makeChip(timeChip), LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT))
-    chipRow.addView(
-      View(this).apply { /* spacer */ },
-      LinearLayout.LayoutParams(dp(8), 1),
-    )
-    chipRow.addView(makeChip(dateChip), LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT))
-    card.addView(
-      chipRow,
-      LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT),
-    )
-
-    scrollInner.addView(
+    content.addView(
       card,
       LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT),
     )
+
     scroll.addView(
-      scrollInner,
+      content,
       LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT),
     )
-    root.addView(
-      scroll,
-      LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f),
-    )
+    root.addView(scroll, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
 
     val footer = LinearLayout(this).apply {
       orientation = LinearLayout.VERTICAL
-      setBackgroundColor(cFooterBg)
-      setPadding(dp(12), dp(12), dp(12), dp(20))
+      setPadding(dp(20), dp(8), dp(20), dp(24))
     }
-    footer.addView(
-      View(this).apply { setBackgroundColor(cFooterStroke) },
-      LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(1)),
-    )
 
-    val actionRow = LinearLayout(this).apply {
-      orientation = LinearLayout.HORIZONTAL
-      setPadding(0, dp(10), 0, 0)
-    }
-    val halfLp = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-    val snoozeBtn = palmRetroButton(snoozeLabel, cFooterBg, cFooterText)
-    snoozeBtn.setOnClickListener {
-      deliverBridge("POSPONER", reminderId, alarmKind, notificationId, titleSnapshot, startTimeSnapshot, dateSnapshot)
-    }
-    actionRow.addView(snoozeBtn, halfLp.apply { marginEnd = dp(6) })
-    val reproBtn = palmRetroButton("Reprogramar", cFooterBg, cFooterText)
-    reproBtn.setOnClickListener {
-      deliverBridge("REPROGRAMAR", reminderId, alarmKind, notificationId, titleSnapshot, startTimeSnapshot, dateSnapshot)
-    }
-    actionRow.addView(reproBtn, halfLp.apply { marginStart = dp(6) })
-    footer.addView(actionRow, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
-
-    val doneBtn = palmRetroButton("Completado", cHeader, cHeaderText, cHeader)
+    val doneBtn = primaryButton("Completar")
     doneBtn.setOnClickListener {
       deliverBridge("OK", reminderId, alarmKind, notificationId, titleSnapshot, startTimeSnapshot, dateSnapshot)
     }
     footer.addView(
       doneBtn,
-      LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
-        topMargin = dp(10)
-      },
+      LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(56)),
     )
 
-    root.addView(
-      footer,
-      LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT),
+    val actionRow = LinearLayout(this).apply {
+      orientation = LinearLayout.HORIZONTAL
+      setPadding(0, dp(14), 0, 0)
+    }
+    val snoozeBtn = secondaryButton(snoozeLabel)
+    snoozeBtn.setOnClickListener {
+      deliverBridge("POSPONER", reminderId, alarmKind, notificationId, titleSnapshot, startTimeSnapshot, dateSnapshot)
+    }
+    actionRow.addView(
+      snoozeBtn,
+      LinearLayout.LayoutParams(0, dp(50), 1f).apply { marginEnd = dp(8) },
     )
+    val reproBtn = secondaryButton("Reprogramar")
+    reproBtn.setOnClickListener {
+      deliverBridge("REPROGRAMAR", reminderId, alarmKind, notificationId, titleSnapshot, startTimeSnapshot, dateSnapshot)
+    }
+    actionRow.addView(
+      reproBtn,
+      LinearLayout.LayoutParams(0, dp(50), 1f).apply { marginStart = dp(8) },
+    )
+    footer.addView(actionRow, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+
+    root.addView(footer, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
 
     setContentView(root)
     ViewCompat.setOnApplyWindowInsetsListener(root) { _, insets ->
       val nav = insets.getInsets(WindowInsetsCompat.Type.navigationBars())
-      footer.setPadding(dp(12), dp(12), dp(12), dp(20) + nav.bottom)
+      footer.setPadding(dp(20), dp(8), dp(20), dp(24) + nav.bottom)
       insets
     }
   }
 
   override fun onDestroy() {
+    stopAlarmFeedback()
     try {
       cpuWakeLock?.let { wl ->
         if (wl.isHeld) wl.release()
@@ -417,43 +620,51 @@ class AlarmLockscreenActivity : Activity() {
     super.onDestroy()
   }
 
+  private fun startAlarmFeedback() {
+    AgendaAlarmSound.start(this)
+  }
+
+  private fun stopAlarmFeedback() {
+    AgendaAlarmSound.stop(this)
+  }
+
   private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
 
-  private fun palmRetroButton(
-    label: String,
-    fillColor: Int,
-    textColor: Int,
-    strokeColor: Int = cFooterStroke,
-  ): Button {
+  private fun wrap(): LinearLayout.LayoutParams =
+    LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+
+  private fun primaryButton(label: String): Button {
     return Button(this).apply {
       text = label
-      setTextColor(textColor)
+      setTextColor(cOnBrand)
+      textSize = 16f
+      isAllCaps = false
+      typeface = Typeface.DEFAULT_BOLD
+      stateListAnimator = null
+      elevation = dp(2).toFloat()
+      background = GradientDrawable().apply {
+        setColor(cBrand)
+        cornerRadius = dp(26).toFloat()
+      }
+      setPadding(dp(16), dp(16), dp(16), dp(16))
+    }
+  }
+
+  private fun secondaryButton(label: String): Button {
+    return Button(this).apply {
+      text = label
+      setTextColor(cBrand)
       textSize = 14f
       isAllCaps = false
       typeface = Typeface.DEFAULT_BOLD
       stateListAnimator = null
       elevation = 0f
       background = GradientDrawable().apply {
-        shape = GradientDrawable.RECTANGLE
-        setColor(fillColor)
-        setStroke(dp(1), strokeColor)
-        cornerRadius = dp(3).toFloat()
+        setColor(cCardBg)
+        setStroke(dp(1), cSecBorder)
+        cornerRadius = dp(22).toFloat()
       }
-      setPadding(dp(10), dp(11), dp(10), dp(11))
-    }
-  }
-
-  private fun makeChip(label: String): TextView {
-    return TextView(this).apply {
-      text = label
-      textSize = 13f
-      setTextColor(cHeaderText)
-      typeface = Typeface.DEFAULT_BOLD
-      setPadding(dp(12), dp(6), dp(12), dp(6))
-      background = GradientDrawable().apply {
-        setColor(cHeader)
-        cornerRadius = dp(2).toFloat()
-      }
+      setPadding(dp(10), dp(13), dp(10), dp(13))
     }
   }
 
@@ -504,10 +715,8 @@ class AlarmLockscreenActivity : Activity() {
     }
   }
 
-  /**
-   * Entrega la acción al contexto JS sin abrir la app (si está vivo). Devuelve false si no hay contexto.
-   */
-  private fun emitBridgeDirect(
+  private fun emitToContext(
+    ctx: com.facebook.react.bridge.ReactContext,
     action: String,
     reminderId: String,
     alarmKind: String,
@@ -515,9 +724,7 @@ class AlarmLockscreenActivity : Activity() {
     titleSnapshot: String,
     startTimeSnapshot: String,
     dateSnapshot: String,
-  ): Boolean {
-    val app = application as? com.facebook.react.ReactApplication ?: return false
-    val ctx = app.reactNativeHost.reactInstanceManager.currentReactContext ?: return false
+  ) {
     val map = com.facebook.react.bridge.Arguments.createMap()
     map.putString("action", action)
     map.putString("reminderId", reminderId)
@@ -528,7 +735,67 @@ class AlarmLockscreenActivity : Activity() {
     map.putString("dateSnapshot", dateSnapshot)
     ctx.getJSModule(com.facebook.react.modules.core.DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
       .emit("agenda:alarm-bridge", map)
-    return true
+  }
+
+  /**
+   * Ejecuta la accion en JS SIN abrir la app. Si el runtime RN ya vive, emite directo; si no, lo
+   * arranca en segundo plano (sin UI) y emite al inicializar. Devuelve false si no fue posible.
+   */
+  private fun deliverToJsWithoutOpeningApp(
+    action: String,
+    reminderId: String,
+    alarmKind: String,
+    notificationId: String,
+    titleSnapshot: String,
+    startTimeSnapshot: String,
+    dateSnapshot: String,
+  ): Boolean {
+    val app = application as? com.facebook.react.ReactApplication ?: return false
+    val mgr = app.reactNativeHost.reactInstanceManager
+    val existing = mgr.currentReactContext
+    if (existing != null) {
+      emitToContext(existing, action, reminderId, alarmKind, notificationId, titleSnapshot, startTimeSnapshot, dateSnapshot)
+      return true
+    }
+    return try {
+      mgr.addReactInstanceEventListener(object : com.facebook.react.ReactInstanceManager.ReactInstanceEventListener {
+        override fun onReactContextInitialized(context: com.facebook.react.bridge.ReactContext) {
+          emitToContext(context, action, reminderId, alarmKind, notificationId, titleSnapshot, startTimeSnapshot, dateSnapshot)
+          mgr.removeReactInstanceEventListener(this)
+        }
+      })
+      if (!mgr.hasStartedCreatingInitialContext()) {
+        mgr.createReactContextInBackground()
+      }
+      true
+    } catch (_: Exception) {
+      false
+    }
+  }
+
+  private fun launchAppWithAction(
+    action: String,
+    reminderId: String,
+    alarmKind: String,
+    notificationId: String,
+    titleSnapshot: String,
+    startTimeSnapshot: String,
+    dateSnapshot: String,
+  ) {
+    val launch = packageManager.getLaunchIntentForPackage(packageName) ?: return
+    launch.addFlags(
+      Intent.FLAG_ACTIVITY_NEW_TASK or
+        Intent.FLAG_ACTIVITY_CLEAR_TOP or
+        Intent.FLAG_ACTIVITY_SINGLE_TOP
+    )
+    launch.putExtra(AgendaAlarmMainActivityBridge.EXTRA_ACTION, action)
+    launch.putExtra(AgendaAlarmMainActivityBridge.EXTRA_REMINDER_ID, reminderId)
+    launch.putExtra(AgendaAlarmMainActivityBridge.EXTRA_ALARM_KIND, alarmKind)
+    launch.putExtra(AgendaAlarmMainActivityBridge.EXTRA_NOTIF_ID, notificationId)
+    launch.putExtra(AgendaAlarmMainActivityBridge.EXTRA_TITLE_SNAPSHOT, titleSnapshot)
+    launch.putExtra(AgendaAlarmMainActivityBridge.EXTRA_START_TIME_SNAPSHOT, startTimeSnapshot)
+    launch.putExtra(AgendaAlarmMainActivityBridge.EXTRA_DATE_SNAPSHOT, dateSnapshot)
+    startActivity(launch)
   }
 
   private fun deliverBridge(
@@ -540,36 +807,60 @@ class AlarmLockscreenActivity : Activity() {
     startTimeSnapshot: String,
     dateSnapshot: String,
   ) {
-    // Detener el sonido insistente al instante (no esperar a que JS cancele la notificación).
+    // Cortar sonido/vibracion al instante y limpiar cualquier notificacion.
+    stopAlarmFeedback()
     try {
-      (getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager).cancelAll()
+      (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).cancelAll()
     } catch (_: Exception) {
     }
-    // Completado / Recordar: solo detener la alarma; no tiene sentido abrir la app.
-    // Reprogramar sí necesita la UI (modal de detalles).
-    if (action != "REPROGRAMAR" &&
-      emitBridgeDirect(action, reminderId, alarmKind, notificationId, titleSnapshot, startTimeSnapshot, dateSnapshot)
-    ) {
+
+    // Reprogramar: unica accion que abre la app (para elegir nueva hora).
+    if (action == "REPROGRAMAR") {
+      launchAppWithAction(action, reminderId, alarmKind, notificationId, titleSnapshot, startTimeSnapshot, dateSnapshot)
       finish()
       return
     }
-    val launch = packageManager.getLaunchIntentForPackage(packageName)
-    if (launch != null) {
-      launch.addFlags(
-        Intent.FLAG_ACTIVITY_NEW_TASK or
-          Intent.FLAG_ACTIVITY_CLEAR_TOP or
-          Intent.FLAG_ACTIVITY_SINGLE_TOP
-      )
-      launch.putExtra(AgendaAlarmMainActivityBridge.EXTRA_ACTION, action)
-      launch.putExtra(AgendaAlarmMainActivityBridge.EXTRA_REMINDER_ID, reminderId)
-      launch.putExtra(AgendaAlarmMainActivityBridge.EXTRA_ALARM_KIND, alarmKind)
-      launch.putExtra(AgendaAlarmMainActivityBridge.EXTRA_NOTIF_ID, notificationId)
-      launch.putExtra(AgendaAlarmMainActivityBridge.EXTRA_TITLE_SNAPSHOT, titleSnapshot)
-      launch.putExtra(AgendaAlarmMainActivityBridge.EXTRA_START_TIME_SNAPSHOT, startTimeSnapshot)
-      launch.putExtra(AgendaAlarmMainActivityBridge.EXTRA_DATE_SNAPSHOT, dateSnapshot)
-      startActivity(launch)
+
+    // Completar / Posponer: ejecutar en JS sin abrir la app.
+    if (deliverToJsWithoutOpeningApp(action, reminderId, alarmKind, notificationId, titleSnapshot, startTimeSnapshot, dateSnapshot)) {
+      finish()
+      return
     }
+    // Ultimo recurso (runtime RN no disponible): encolar la accion para procesarla al iniciar JS,
+    // SIN abrir la app. La unica UI de alarma debe ser esta Lock Screen.
+    enqueuePendingAction(action, reminderId, alarmKind, notificationId, titleSnapshot, startTimeSnapshot, dateSnapshot)
     finish()
+  }
+
+  /** Persiste una accion pendiente (Completar/Posponer) que JS drenara al iniciar (sin abrir la app). */
+  private fun enqueuePendingAction(
+    action: String,
+    reminderId: String,
+    alarmKind: String,
+    notificationId: String,
+    titleSnapshot: String,
+    startTimeSnapshot: String,
+    dateSnapshot: String,
+  ) {
+    try {
+      val prefs = getSharedPreferences("AgendaAlarmPrefs", Context.MODE_PRIVATE)
+      val arr = try {
+        org.json.JSONArray(prefs.getString("pending_actions", "[]") ?: "[]")
+      } catch (_: Exception) {
+        org.json.JSONArray()
+      }
+      val obj = JSONObject()
+      obj.put("action", action)
+      obj.put("reminderId", reminderId)
+      obj.put("alarmKind", alarmKind)
+      obj.put("notificationId", notificationId)
+      obj.put("titleSnapshot", titleSnapshot)
+      obj.put("startTimeSnapshot", startTimeSnapshot)
+      obj.put("dateSnapshot", dateSnapshot)
+      arr.put(obj)
+      prefs.edit().putString("pending_actions", arr.toString()).apply()
+    } catch (_: Exception) {
+    }
   }
 }
 `;
@@ -645,6 +936,17 @@ function withAlarmLockscreenManifest(config) {
         },
       });
     }
+    const bannerAction = pkg + '.ALARM_BANNER_ACTION';
+    const hasReceiver = (app.receiver || []).some(
+      (r) => r.$['android:name'] === '.AgendaAlarmBannerReceiver'
+    );
+    if (!hasReceiver) {
+      if (!app.receiver) app.receiver = [];
+      app.receiver.push({
+        $: { 'android:name': '.AgendaAlarmBannerReceiver', 'android:exported': 'false' },
+        'intent-filter': [{ action: [{ $: { 'android:name': bannerAction } }] }],
+      });
+    }
     return cfg;
   });
 }
@@ -665,9 +967,13 @@ function withAgendaAlarmLockscreen(config) {
       fs.mkdirSync(javaDir, { recursive: true });
 
       fs.writeFileSync(path.join(javaDir, 'AgendaAlarmMainActivityBridge.kt'), makeMainActivityBridge(pkg), 'utf8');
+      fs.writeFileSync(path.join(javaDir, 'AgendaAlarmSound.kt'), makeAlarmSound(pkg), 'utf8');
       fs.writeFileSync(path.join(javaDir, 'AgendaAlarmNativeModule.kt'), makeNativeModule(pkg), 'utf8');
       fs.writeFileSync(path.join(javaDir, 'AgendaAlarmNativePackage.kt'), makeNativePackage(pkg), 'utf8');
       fs.writeFileSync(path.join(javaDir, 'AlarmLockscreenActivity.kt'), makeLockscreenActivity(pkg), 'utf8');
+
+      const drawableDir = path.join(root, 'app', 'src', 'main', 'res', 'drawable');
+      writeAlarmBannerDrawables(drawableDir);
 
       const mainAppPath = path.join(javaDir, 'MainApplication.kt');
       if (fs.existsSync(mainAppPath)) {

@@ -10,7 +10,7 @@ import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { runOnJS } from 'react-native-reanimated';
 import { StatusBar } from 'expo-status-bar';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { AgendaHeader, AgendaSchedule, AgendaFooter, WeekView, MonthView, DaySummaryView, GoToDateScreen, EventDetailsModal, AlarmRingScreen } from '../components';
+import { AgendaHeader, AgendaSchedule, AgendaFooter, WeekView, MonthView, DaySummaryView, GoToDateScreen, EventDetailsModal } from '../components';
 import { AgendaNavBar, useAgendaNavStyles } from '../components/AgendaNavBar';
 import { OptionsScreen } from './OptionsScreen';
 import { ScreenOverlay } from '../components/PalmScreenShell';
@@ -45,14 +45,10 @@ import {
   cancelNotificationsForReminder,
   REMINDER_DELETED_FROM_NOTIFICATION,
   REMINDER_RESCHEDULE_FROM_NOTIFICATION,
-  ALARM_RING_DISPLAY,
-  ALARM_RING_DISMISSED,
-  processAlarmRingUserAction,
-  type AlarmRingDisplayPayload,
   consumePendingRescheduleReminderId,
+  ensureAlarmLaunchPermissions,
   resyncAllScheduledNotifications,
 } from '../services/localNotificationService';
-import type { Notification } from '@notifee/react-native';
 import { clearAcksForReminder } from '../services/alarmAckService';
 import { runStartupPermissionFlow } from '../services/startupPermissionsService';
 import { getDaySchedule } from '../services/dayScheduleService';
@@ -86,7 +82,6 @@ export function AgendaScreen() {
   const [selectedReminder, setSelectedReminder] = useState<Reminder | null>(null);
   const [detailsInitialTarget, setDetailsInitialTarget] = useState<'alarm' | 'note' | 'time' | null>(null);
   const [detailsVisible, setDetailsVisible] = useState(false);
-  const [alarmRingNotification, setAlarmRingNotification] = useState<Notification | null>(null);
   const [scheduleScrollFocus, setScheduleScrollFocus] = useState<{
     token: number;
     startMinutes: number | null;
@@ -160,6 +155,8 @@ export function AgendaScreen() {
     let cancelled = false;
     (async () => {
       await runStartupPermissionFlow();
+      if (cancelled) return;
+      await ensureAlarmLaunchPermissions({ force: true });
       if (cancelled) return;
       await initLocalNotifications();
       if (cancelled) return;
@@ -270,44 +267,6 @@ export function AgendaScreen() {
     );
     return () => sub.remove();
   }, [openReminderForReschedule]);
-
-  useEffect(() => {
-    const showSub = DeviceEventEmitter.addListener(
-      ALARM_RING_DISPLAY,
-      (payload: AlarmRingDisplayPayload) => {
-        setAlarmRingNotification(payload.notification);
-      },
-    );
-    const hideSub = DeviceEventEmitter.addListener(
-      ALARM_RING_DISMISSED,
-      (payload: { notificationId: string }) => {
-        setAlarmRingNotification((prev) =>
-          prev?.id === payload.notificationId ? null : prev,
-        );
-      },
-    );
-    return () => {
-      showSub.remove();
-      hideSub.remove();
-    };
-  }, []);
-
-  const handleAlarmRingAction = useCallback(
-    async (action: 'complete' | 'snooze' | 'reschedule') => {
-      if (!alarmRingNotification) return;
-      await processAlarmRingUserAction(action, alarmRingNotification);
-      setAlarmRingNotification(null);
-      void loadReminders();
-      void loadWeekReminders();
-      void loadMonthReminders();
-    },
-    [
-      alarmRingNotification,
-      loadReminders,
-      loadWeekReminders,
-      loadMonthReminders,
-    ],
-  );
 
   const handlePrevious = useCallback(() => {
     setSelectedDate((prev) => addDays(prev, -1));
@@ -853,16 +812,6 @@ export function AgendaScreen() {
             onMonthChange={handleGoToDateMonthChange}
             onSelectDate={handleGoToDateSelect}
             onClose={() => setGoToDateVisible(false)}
-          />
-        </ScreenOverlay>
-      ) : null}
-      {alarmRingNotification ? (
-        <ScreenOverlay zIndex={100}>
-          <AlarmRingScreen
-            notification={alarmRingNotification}
-            onComplete={() => void handleAlarmRingAction('complete')}
-            onSnooze={() => void handleAlarmRingAction('snooze')}
-            onReschedule={() => void handleAlarmRingAction('reschedule')}
           />
         </ScreenOverlay>
       ) : null}

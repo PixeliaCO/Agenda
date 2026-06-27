@@ -19,4 +19,3 @@ export {
 export { OptionsScreen, OptionsModal } from './OptionsModal';
 export { EventDetailsModal } from './EventDetailsModal';
 export { PalmScreenShell, ScreenOverlay } from './PalmScreenShell';
-export { AlarmRingScreen, type AlarmRingScreenProps } from './AlarmRingScreen';

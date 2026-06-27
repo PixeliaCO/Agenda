@@ -27,6 +27,7 @@ import {
   openAndroidAppDetailsSettings,
   openAndroidExactAlarmPermissionSettings,
   openAndroidManageFullScreenIntentSettings,
+  openAndroidOverlayPermissionSettings,
   resyncAllScheduledNotifications,
   type AndroidAlarmWakeDiagnostics,
 } from '../services/localNotificationService';
@@ -517,6 +518,12 @@ export function OptionsScreen({ onClose, selectedDate, onDayScheduleSaved }: Opt
               <Text style={styles.androidBtnText}>Permitir pantalla completa en alarmas</Text>
             </TouchableOpacity>
           ) : null}
+          <TouchableOpacity
+            style={styles.androidBtn}
+            onPress={() => void openAndroidOverlayPermissionSettings()}
+          >
+            <Text style={styles.androidBtnText}>Mostrar sobre otras apps (Lock Screen automática)</Text>
+          </TouchableOpacity>
           <TouchableOpacity style={styles.androidBtn} onPress={() => void openAndroidExactAlarmPermissionSettings()}>
             <Text style={styles.androidBtnText}>Permiso de alarmas exactas</Text>
           </TouchableOpacity>
