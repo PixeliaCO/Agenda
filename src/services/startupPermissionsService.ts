@@ -16,23 +16,23 @@ async function performFirstLaunchPermissions(): Promise<void> {
   if (Platform.OS === 'web' || Platform.OS !== 'android' || isExpoGoEnvironment()) return;
 
   const done = await AsyncStorage.getItem(STORAGE_KEY);
-  if (done === 'true') return;
+  if (done !== 'true') {
+    const notifee = require('@notifee/react-native').default;
+    await notifee.requestPermission({
+      alert: true,
+      badge: true,
+      sound: true,
+    });
+    await AsyncStorage.setItem(STORAGE_KEY, 'true');
+  }
 
-  const notifee = require('@notifee/react-native').default;
-  await notifee.requestPermission({
-    alert: true,
-    badge: true,
-    sound: true,
-  });
-
+  // Overlay + pantalla completa en alarmas: comprobar en cada arranque hasta conceder.
   try {
     const { ensureAlarmLaunchPermissions } = await import('./localNotificationService');
     await ensureAlarmLaunchPermissions({ force: true });
   } catch {
     /* */
   }
-
-  await AsyncStorage.setItem(STORAGE_KEY, 'true');
 }
 
 /**

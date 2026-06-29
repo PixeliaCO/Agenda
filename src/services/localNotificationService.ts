@@ -50,6 +50,7 @@ const AndroidCategory = notifeeBundle?.AndroidCategory;
 const AndroidFlags = notifeeBundle?.AndroidFlags;
 const AndroidImportance = notifeeBundle?.AndroidImportance;
 const AndroidNotificationSetting = notifeeBundle?.AndroidNotificationSetting;
+const AndroidStyle = notifeeBundle?.AndroidStyle;
 const AndroidVisibility = notifeeBundle?.AndroidVisibility;
 const AuthorizationStatus = notifeeBundle?.AuthorizationStatus;
 const EventType = notifeeBundle?.EventType;
@@ -324,31 +325,31 @@ let alarmLaunchPermissionsPromptedThisSession = false;
 export async function ensureAlarmLaunchPermissions(options?: {
   force?: boolean;
 }): Promise<{ overlay: boolean; fsi: boolean }> {
-  const overlay = await androidCanDrawOverlays();
-  const fsi = await androidCanUseFullScreenIntent();
+  let overlay = await androidCanDrawOverlays();
+  let fsi = await androidCanUseFullScreenIntent();
   const api = androidApiLevel();
+  const needsOverlay = !overlay;
+  const needsFsi = api >= 34 && !fsi;
+
+  if (!needsOverlay && !needsFsi) {
+    return { overlay, fsi };
+  }
 
   if (!options?.force && alarmLaunchPermissionsPromptedThisSession) {
     return { overlay, fsi };
   }
 
-  let opened = false;
-  if (api >= 34 && !fsi) {
+  if (needsFsi) {
     await openAndroidManageFullScreenIntentSettings();
-    opened = true;
   }
-  if (!overlay) {
+  if (needsOverlay) {
     await openAndroidOverlayPermissionSettings();
-    opened = true;
   }
+  alarmLaunchPermissionsPromptedThisSession = true;
 
-  if (opened) {
-    alarmLaunchPermissionsPromptedThisSession = true;
-  }
-
-  const overlayAfter = await androidCanDrawOverlays();
-  const fsiAfter = await androidCanUseFullScreenIntent();
-  return { overlay: overlayAfter, fsi: fsiAfter };
+  overlay = await androidCanDrawOverlays();
+  fsi = await androidCanUseFullScreenIntent();
+  return { overlay, fsi };
 }
 
 /** @deprecated Usar ensureAlarmLaunchPermissions */
@@ -386,6 +387,8 @@ type AlarmNotifPayload = {
   titleSnapshot: string;
   startTimeSnapshot: string;
   dateSnapshot: string;
+  /** HH:mm (24h) de cuándo suena esta instancia (pospuesta o no). */
+  fireTimeSnapshot?: string;
 };
 
 function payloadFromReminder(
@@ -402,13 +405,15 @@ function payloadFromReminder(
 }
 
 function toDataStrings(p: AlarmNotifPayload): Record<string, string> {
-  return {
+  const out: Record<string, string> = {
     reminderId: p.reminderId,
     alarmKind: p.alarmKind,
     titleSnapshot: p.titleSnapshot,
     startTimeSnapshot: p.startTimeSnapshot,
     dateSnapshot: p.dateSnapshot,
   };
+  if (p.fireTimeSnapshot) out.fireTimeSnapshot = p.fireTimeSnapshot;
+  return out;
 }
 
 function getAlarmLockscreenLaunchActivity(): string | undefined {
@@ -428,6 +433,130 @@ function alarmBannerTime(startTime: string): string {
   return `${h}:${String(Number.isFinite(m) ? m : 0).padStart(2, "0")}`;
 }
 
+function fireTimeHHmmFromMs(fireMs: number): string {
+  const d = new Date(fireMs);
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
+function alarmBannerTimeFromMs(fireMs: number): string {
+  return alarmBannerTime(fireTimeHHmmFromMs(fireMs));
+}
+
+function fireMsFromHHmmToday(hhmm: string): number {
+  const parts = hhmm.split(":");
+  const h = parseInt(parts[0] ?? "0", 10);
+  const m = parseInt(parts[1] ?? "0", 10);
+  const d = new Date();
+  d.setSeconds(0, 0);
+  d.setHours(Number.isFinite(h) ? h : 0, Number.isFinite(m) ? m : 0, 0, 0);
+  if (d.getTime() < Date.now() - 12 * 60 * 60 * 1000) {
+    d.setDate(d.getDate() + 1);
+  }
+  return d.getTime();
+}
+
+function isPostponeNotificationId(id: string | undefined): boolean {
+  return (
+    id?.startsWith("agenda-p-") === true || id?.startsWith("agenda-ap-") === true
+  );
+}
+
+function resolveFireMsForNotification(
+  n: Notification,
+  reminder: Reminder,
+): number {
+  const fire = n.data?.fireTimeSnapshot;
+  if (typeof fire === "string" && fire.includes(":")) {
+    return fireMsFromHHmmToday(fire);
+  }
+  if (isPostponeNotificationId(n.id)) {
+    return Date.now();
+  }
+  return fireMsFromHHmmToday(reminder.startTime);
+}
+
+function resolvePayloadFireTime(n: Notification, reminder: Reminder): string {
+  const fromData = n.data?.fireTimeSnapshot;
+  if (typeof fromData === "string" && fromData.includes(":")) {
+    if (
+      !isPostponeNotificationId(n.id) ||
+      fromData !== reminder.startTime
+    ) {
+      return fromData;
+    }
+  }
+  if (isPostponeNotificationId(n.id)) {
+    return fireTimeHHmmFromMs(Date.now());
+  }
+  return reminder.startTime;
+}
+
+/** Título = hora real de disparo; subtítulo = nombre del evento guardado. */
+function patchAlarmNotificationDisplay(
+  notification: Notification,
+  reminder: Reminder,
+  fireMs: number,
+): Notification {
+  const eventTitle = reminder.title?.trim() || "Evento";
+  const fireTimeHHmm = fireTimeHHmmFromMs(fireMs);
+  const existing = (notification.data ?? {}) as Record<string, string>;
+  const data = {
+    ...existing,
+    fireTimeSnapshot: fireTimeHHmm,
+    titleSnapshot: eventTitle,
+    displayTitle: eventTitle,
+  };
+  const android = notification.android
+    ? {
+        ...notification.android,
+        ...(AndroidStyle
+          ? {
+              style: {
+                type: AndroidStyle.BIGTEXT,
+                text: eventTitle,
+                title: alarmBannerTimeFromMs(fireMs),
+              },
+            }
+          : {}),
+      }
+    : notification.android;
+  const patched = {
+    ...notification,
+    title: alarmBannerTimeFromMs(fireMs),
+    body: eventTitle,
+    subtitle: eventTitle,
+    data,
+    android,
+  };
+  return patched;
+}
+
+async function refreshDeliveredAlarmBanner(
+  notification: Notification,
+): Promise<void> {
+  if (!notifee || !notification.id) return;
+  suppressNextDeliveredForBannerRefresh = true;
+  try {
+    await notifee.displayNotification(notification);
+  } catch {
+    suppressNextDeliveredForBannerRefresh = false;
+  }
+}
+
+function bannerTimeFromNotification(
+  notification: Notification,
+  reminder: Reminder,
+): string {
+  const fire = notification.data?.fireTimeSnapshot;
+  if (typeof fire === "string" && fire.includes(":")) {
+    return alarmBannerTime(fire);
+  }
+  if (notification.title?.includes(":")) {
+    return notification.title.trim();
+  }
+  return alarmBannerTime(reminder.startTime);
+}
+
 function startNativeAlarmSound(): void {
   if (Platform.OS !== "android") return;
   try {
@@ -436,6 +565,34 @@ function startNativeAlarmSound(): void {
       | undefined;
     const hasMod = typeof mod?.startAlarmSound === "function";
     if (hasMod) mod!.startAlarmSound!();
+  } catch {
+    /* */
+  }
+}
+
+function scheduleNativeAlarmWake(
+  fireMs: number,
+  notificationId: string,
+): void {
+  if (Platform.OS !== "android") return;
+  try {
+    const mod = NativeModules.AgendaAlarmNative as
+      | { scheduleNativeAlarmWake?: (fireMs: number, id: string) => void }
+      | undefined;
+    if (typeof mod?.scheduleNativeAlarmWake !== "function") return;
+    mod.scheduleNativeAlarmWake(fireMs, notificationId);
+  } catch {
+    /* */
+  }
+}
+
+function cancelNativeAlarmWake(notificationId: string): void {
+  if (Platform.OS !== "android") return;
+  try {
+    const mod = NativeModules.AgendaAlarmNative as
+      | { cancelNativeAlarmWake?: (id: string) => void }
+      | undefined;
+    mod?.cancelNativeAlarmWake?.(notificationId);
   } catch {
     /* */
   }
@@ -452,9 +609,6 @@ function stopNativeAlarmSound(): void {
     /* */
   }
 }
-
-/** Color de acento del banner (reloj azul como alarma del sistema). */
-const ALARM_BANNER_ACCENT = "#1332F6";
 
 /** Acciones del banner: icono + etiqueta corta (Android 12+ no muestra solo iconos). */
 function buildAlarmBannerActions(): NonNullable<
@@ -479,11 +633,9 @@ function alarmBannerAndroidBase(
   lockLa: string | undefined,
   fullScreenId: string,
 ): NonNullable<Notification["android"]> {
-  return {
+  const config = {
     channelId,
     smallIcon: "ic_agenda_alarm",
-    largeIcon: "ic_agenda_alarm",
-    color: ALARM_BANNER_ACCENT,
     category: AndroidCategory.ALARM,
     ongoing: true,
     autoCancel: false,
@@ -499,6 +651,7 @@ function alarmBannerAndroidBase(
     actions: buildAlarmBannerActions(),
     localOnly: true,
   };
+  return config;
 }
 
 async function androidIsScreenInteractive(): Promise<boolean> {
@@ -531,6 +684,10 @@ function alarmKindFromNotificationData(
   return "start";
 }
 
+function isRepeatRingNotificationId(id: string | undefined): boolean {
+  return typeof id === "string" && /-ring\d+$/.test(id);
+}
+
 function primeNativeLockScreenPayload(
   reminder: Reminder,
   n: Notification,
@@ -545,10 +702,13 @@ function primeNativeLockScreenPayload(
   if (!id || typeof mod?.primeLockScreenPayload !== "function") return;
   const kind = alarmKindFromNotificationData(n);
   const p = payloadFromReminder(reminder, kind);
+  const eventTitle = reminder.title?.trim() || "Evento";
+  const fireTime = resolvePayloadFireTime(n, reminder);
   const payload = {
     ...p,
-    displayTitle: n.title?.trim() || "Evento",
-    displayBody: n.body ?? "",
+    fireTimeSnapshot: fireTime,
+    displayTitle: eventTitle,
+    displayBody: n.body?.trim() || eventTitle,
     notificationId: id,
     snoozeMinutes,
   };
@@ -559,11 +719,27 @@ function primeNativeLockScreenPayload(
   }
 }
 
+function activateNativeLockScreenPayload(notificationId: string | undefined): void {
+  const launch = getAlarmLockscreenLaunchActivity();
+  if (!launch || Platform.OS !== "android") return;
+  const mod = NativeModules.AgendaAlarmNative as
+    | { activateLockScreenPayload?: (id: string) => void }
+    | undefined;
+  if (!notificationId || typeof mod?.activateLockScreenPayload !== "function") return;
+  try {
+    mod.activateLockScreenPayload(notificationId);
+  } catch {
+    /* */
+  }
+}
+
 let lastLockScreenPresentedId: string | null = null;
 let lastLockScreenPresentedAt = 0;
 let lockScreenPresentInFlight = false;
 /** Evita OK automático al cancelar Notifee para mostrar banner nativo. */
 let suppressNextDismissedForNativeBanner = false;
+/** Evita bucle al refrescar texto del banner con displayNotification. */
+let suppressNextDeliveredForBannerRefresh = false;
 
 async function presentNativeAlarmHeadsUpBanner(
   notification: Notification,
@@ -602,7 +778,7 @@ async function presentNativeAlarmHeadsUpBanner(
   try {
     mod.showAlarmHeadsUpBanner(
       notification.id,
-      alarmBannerTime(reminder.startTime),
+      bannerTimeFromNotification(notification, reminder),
       JSON.stringify(payload),
     );
   } catch {
@@ -658,27 +834,34 @@ async function presentAlarmLockScreenIfNeeded(
     ]);
     if (!r) return;
 
+    const fireMs = resolveFireMsForNotification(notification, r);
+    const displayNotification = patchAlarmNotificationDisplay(
+      notification,
+      r,
+      fireMs,
+    );
+
     const behavior = await getAlarmBehaviorSettings();
-    primeNativeLockScreenPayload(r, notification, behavior.snoozeMinutes);
+    primeNativeLockScreenPayload(r, displayNotification, behavior.snoozeMinutes);
+    activateNativeLockScreenPayload(notification.id);
 
     startNativeAlarmSound();
 
     if (!screenOn) {
       const mod = NativeModules.AgendaAlarmNative as
-        | { launchLockScreenActivity?: () => void }
+        | { launchLockScreenActivity?: (id: string) => void }
         | undefined;
       if (typeof mod?.launchLockScreenActivity === "function") {
-        mod.launchLockScreenActivity();
+        mod.launchLockScreenActivity(notification.id);
       }
-      await hideAlarmBannerNotification(notification.id);
-      await dismissNativeAlarmHeadsUpBanner(notification.id);
       lastLockScreenPresentedId = notification.id;
       lastLockScreenPresentedAt = now;
       return;
     }
 
-    // Pantalla encendida: banner nativo con iconos circulares.
-    await presentNativeAlarmHeadsUpBanner(notification, r);
+    // Pantalla encendida: refrescar banner con hora + título del evento.
+    await refreshDeliveredAlarmBanner(displayNotification);
+    await presentNativeAlarmHeadsUpBanner(displayNotification, r);
     lastLockScreenPresentedId = notification.id;
     lastLockScreenPresentedAt = now;
   } finally {
@@ -832,6 +1015,7 @@ async function dismissAlarmNotification(
   } catch {
     /* */
   }
+  cancelNativeAlarmWake(notificationId);
 }
 
 /**
@@ -922,6 +1106,7 @@ async function cancelExistingPostpones(reminderId: string): Promise<void> {
         tid.startsWith(`agenda-p-${reminderId}`) ||
         tid.startsWith(`agenda-ap-${reminderId}`)
       ) {
+        cancelNativeAlarmWake(tid);
         await notifee.cancelTriggerNotification(tid);
       }
     }
@@ -955,6 +1140,12 @@ async function schedulePostpone(
       alarmManager: { type: AlarmType.SET_ALARM_CLOCK },
     },
     notification,
+  );
+  const behavior = await getAlarmBehaviorSettings();
+  primeNativeLockScreenPayload(
+    reminder,
+    patchAlarmNotificationDisplay({ ...notification, id }, reminder, whenMs),
+    behavior.snoozeMinutes,
   );
 }
 
@@ -1093,6 +1284,10 @@ export async function handleNotifeeBackgroundEvent(
   const { notification, pressAction } = detail;
 
   if (type === EventType.DELIVERED && notification) {
+    if (suppressNextDeliveredForBannerRefresh) {
+      suppressNextDeliveredForBannerRefresh = false;
+      return;
+    }
     await presentAlarmLockScreenIfNeeded(notification);
     return;
   }
@@ -1399,10 +1594,12 @@ function buildAnticipationNotification(
   void _opts;
   const lockLa = getAlarmLockscreenLaunchActivity();
   const p = payloadFromReminder(reminder, "anticipation");
+  const eventTitle = reminder.title?.trim() || "Evento";
   return {
     id,
     title: alarmBannerTime(reminder.startTime),
-    body: "Alarma",
+    body: eventTitle,
+    subtitle: eventTitle,
     data: toDataStrings(p),
     android: alarmBannerAndroidBase(
       ANDROID_CHANNEL_ANTICIPATION,
@@ -1420,10 +1617,12 @@ function buildStartNotification(
   void _opts;
   const lockLa = getAlarmLockscreenLaunchActivity();
   const p = payloadFromReminder(reminder, "start");
+  const eventTitle = reminder.title?.trim() || "Evento";
   return {
     id,
     title: alarmBannerTime(reminder.startTime),
-    body: "Alarma",
+    body: eventTitle,
+    subtitle: eventTitle,
     data: toDataStrings(p),
     android: alarmBannerAndroidBase(
       ANDROID_CHANNEL_EVENT_START,
@@ -1483,6 +1682,10 @@ async function performInitLocalNotifications(): Promise<void> {
     foregroundUnsub = notifee.onForegroundEvent(({ type, detail }) => {
       const { notification, pressAction } = detail;
       if (type === EventType.DELIVERED && notification) {
+        if (suppressNextDeliveredForBannerRefresh) {
+          suppressNextDeliveredForBannerRefresh = false;
+          return;
+        }
         void presentAlarmLockScreenIfNeeded(notification);
         return;
       }
@@ -1611,6 +1814,7 @@ export async function cancelNotificationsForReminder(
     for (const t of triggers) {
       const rid = t.notification.data?.reminderId;
       if (rid === reminderId && t.notification.id) {
+        cancelNativeAlarmWake(t.notification.id);
         await notifee.cancelTriggerNotification(t.notification.id);
       }
     }
@@ -1621,6 +1825,10 @@ export async function cancelNotificationsForReminder(
         await notifee.cancelDisplayedNotification(d.id);
       }
     }
+    // Backstops nativos de las pospuestas (ids estables): se cancelan aunque su
+    // trigger Notifee ya no exista (p.ej. tras Completar), o seguirían sonando.
+    cancelNativeAlarmWake(postponeIdFor(reminderId, "start"));
+    cancelNativeAlarmWake(postponeIdFor(reminderId, "anticipation"));
   } catch {
     /* */
   }
@@ -1659,15 +1867,21 @@ async function scheduleTrigger(
 ): Promise<void> {
   void identifier;
   const fireMs = triggerFireTimestampMs(trigger);
-  const base = withAlarmWakeBoost(notification, fireMs);
   const behavior = await getAlarmBehaviorSettings();
-  primeNativeLockScreenPayload(reminder, base, behavior.snoozeMinutes);
+  const base =
+    fireMs != null
+      ? patchAlarmNotificationDisplay(notification, reminder, fireMs)
+      : notification;
+  const boosted = withAlarmWakeBoost(base, fireMs);
+  if (!isRepeatRingNotificationId(boosted.id)) {
+    primeNativeLockScreenPayload(reminder, boosted, behavior.snoozeMinutes);
+  }
   const attempts: Array<{
     label: string;
     n: Notification;
     t: TimestampTrigger;
   }> = [
-    { label: "alarm_clock+ui_completa", n: base, t: trigger },
+    { label: "alarm_clock+ui_completa", n: boosted, t: trigger },
     {
       label: "alarm_clock+sin_fullscreen",
       n: withAlarmWakeBoost(stripFullScreenIntentOnly(base), fireMs),
@@ -1708,6 +1922,9 @@ async function scheduleTrigger(
         console.warn(
           `[Agenda] Alarma programada vía "${att.label}" (id ${notification.id ?? "?"})`,
         );
+      }
+      if (fireMs != null && notification.id && !isRepeatRingNotificationId(notification.id)) {
+        scheduleNativeAlarmWake(fireMs, notification.id);
       }
       return;
     } catch (e) {

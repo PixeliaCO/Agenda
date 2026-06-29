@@ -2,6 +2,7 @@
   "expo": {
     "name": "Palm",
     "slug": "palm",
+    "scheme": "agendapalm",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/LogoApp.png",

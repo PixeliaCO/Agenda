@@ -12,7 +12,7 @@ function writeAlarmBannerDrawables(drawableDir) {
     'ic_agenda_alarm.xml': `<vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp" android:height="24dp"
     android:viewportWidth="24" android:viewportHeight="24">
-  <path android:fillColor="#1332F6" android:pathData="M12,2C6.48,2 2,6.48 2,12s4.48,10 10,10 10,-4.48 10,-10S17.52,2 12,2zM12.5,6H11v6l5.25,3.15 0.75,-1.23 -4.5,-2.67V6z"/>
+  <path android:fillColor="#FFFFFF" android:pathData="M22,5.72l-4.6,-3.86 -1.29,1.53 4.6,3.86L22,5.72zM12,4c-4.97,0 -9,4.03 -9,9s4.03,9 9,9 9,-4.03 9,-9 -4.03,-9 -9,-9zM12,20c-3.87,0 -7,-3.13 -7,-7s3.13,-7 7,-7 7,3.13 7,7 -3.13,7 -7,7zM11.5,7v5.25l4.5,2.67 -0.75,1.23L10,13V7h1.5z"/>
 </vector>`,
     'ic_agenda_snooze.xml': `<vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp" android:height="24dp"
@@ -209,6 +209,16 @@ class AgendaAlarmNativeModule(reactContext: ReactApplicationContext) :
       .getSharedPreferences("AgendaAlarmPrefs", Context.MODE_PRIVATE)
       .edit()
       .putString("payload_" + notificationId, payloadJson)
+      .apply()
+  }
+
+  /** Marca qué payload debe usar la Lock Screen al dispararse (no al programar). */
+  @ReactMethod
+  fun activateLockScreenPayload(notificationId: String) {
+    if (notificationId.isBlank()) return
+    reactApplicationContext
+      .getSharedPreferences("AgendaAlarmPrefs", Context.MODE_PRIVATE)
+      .edit()
       .putString("payload_current_id", notificationId)
       .apply()
   }
@@ -238,9 +248,20 @@ class AgendaAlarmNativeModule(reactContext: ReactApplicationContext) :
 
   /** Lanza AlarmLockscreenActivity; en API 34+ usa PendingIntent con permiso de inicio en background. */
   @ReactMethod
-  fun launchLockScreenActivity() {
+  fun launchLockScreenActivity(notificationId: String?) {
     val ctx = reactApplicationContext.applicationContext
+    val prefs = ctx.getSharedPreferences("AgendaAlarmPrefs", Context.MODE_PRIVATE)
+    val notifId =
+      notificationId?.takeIf { it.isNotBlank() }
+        ?: prefs.getString("payload_current_id", null)
+        ?: "unknown"
+    if (notifId.isNotBlank() && notifId != "unknown") {
+      prefs.edit().putString("payload_current_id", notifId).apply()
+    }
     val intent = Intent(ctx, AlarmLockscreenActivity::class.java)
+    if (notifId.isNotBlank() && notifId != "unknown") {
+      intent.putExtra(AlarmLockscreenActivity.EXTRA_NOTIFICATION_ID, notifId)
+    }
     intent.addFlags(
       Intent.FLAG_ACTIVITY_NEW_TASK or
         Intent.FLAG_ACTIVITY_CLEAR_TOP or
@@ -429,17 +450,19 @@ class AlarmLockscreenActivity : Activity() {
     }
 
     val payload = loadPayloadJson()
-    val title = payload.optString("displayTitle", payload.optString("titleSnapshot", "Evento"))
-    val body = payload.optString("displayBody", "Alarma")
+    val eventTitle = payload.optString("displayTitle", payload.optString("titleSnapshot", "Evento"))
+    val title = eventTitle
+    val body = payload.optString("displayBody", eventTitle)
     val reminderId = payload.optString("reminderId", "")
     val alarmKind = payload.optString("alarmKind", "start")
     val notificationId = payload.optString("notificationId", "")
     val titleSnapshot = payload.optString("titleSnapshot", "Evento")
     val startTimeSnapshot = payload.optString("startTimeSnapshot", "09:00")
     val dateSnapshot = payload.optString("dateSnapshot", "2000-01-01")
+    val fireTimeSnapshot = payload.optString("fireTimeSnapshot", startTimeSnapshot)
     val snoozeMinutes = payload.optInt("snoozeMinutes", 5).coerceIn(1, 120)
     val snoozeLabel = "Recordar en " + snoozeMinutes + " min"
-    val timeChip = formatTimeChip(startTimeSnapshot)
+    val timeChip = formatTimeChip(fireTimeSnapshot)
     val dateChip = formatDateChip(dateSnapshot)
 
     val root = LinearLayout(this).apply {
@@ -478,10 +501,10 @@ class AlarmLockscreenActivity : Activity() {
 
     content.addView(
       TextView(this).apply {
-        text = "ALARMA"
+        text = eventTitle
         textSize = 13f
         setTextColor(cKicker)
-        letterSpacing = 0.18f
+        letterSpacing = 0.08f
         typeface = Typeface.DEFAULT_BOLD
         gravity = Gravity.CENTER
       },

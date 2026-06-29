@@ -16,10 +16,16 @@ let didApplyGlobalFont = false;
 let originalTextRender: any = null;
 
 export default function App() {
-  const [fontsLoaded] = useFonts({
+  const [fontsLoaded, fontError] = useFonts({
     PixelOperator: require('./assets/font/PixelOperator.ttf'),
     'PixelOperator-Bold': require('./assets/font/PixelOperator-Bold.ttf'),
   });
+
+  useEffect(() => {
+    if (fontError) {
+      console.warn('[Agenda] No se pudieron cargar las fuentes PixelOperator:', fontError);
+    }
+  }, [fontError]);
 
   useEffect(() => {
     if (!fontsLoaded) return;
@@ -61,7 +67,10 @@ export default function App() {
     (TextInput.defaultProps as any).maxFontSizeMultiplier = 1;
   }, [fontsLoaded]);
 
-  if (!fontsLoaded) return null;
+  // No bloquear la UI si las fuentes fallan (evita pantalla blanca permanente).
+  if (!fontsLoaded && !fontError) {
+    return <GestureHandlerRootView style={{ flex: 1, backgroundColor: '#ffffff' }} />;
+  }
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
