@@ -5,7 +5,7 @@
     "scheme": "agendapalm",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/LogoApp.png",
+    "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "splash": {
       "image": "./assets/LogoApp.png",
@@ -28,7 +28,8 @@
       ],
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/LogoApp.png"
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png"
       },
       "predictiveBackGestureEnabled": false,
       "package": "com.warrioxproductionss.agendapalm"
@@ -37,10 +38,11 @@
       "./plugins/withNotifeeMavenRepo.js",
       "./plugins/withAgendaSystemAlarmChannel.js",
       "./plugins/withAgendaFullScreenAlarm.js",
-      "./plugins/withAgendaAlarmLockscreen.js"
+      "./plugins/withAgendaAlarmLockscreen.js",
+      "expo-font"
     ],
     "web": {
-      "favicon": "./assets/LogoApp.png"
+      "favicon": "./assets/favicon.png"
     },
     "owner": "andresrodasfm",
     "runtimeVersion": {
