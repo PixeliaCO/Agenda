@@ -112,6 +112,229 @@ object AgendaAlarmSound {
 `;
 }
 
+function makeAgendaAlarmHeadsUp(packageName) {
+  return `package ${packageName}
+
+import android.app.Notification
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.content.Context
+import android.content.Intent
+import android.graphics.drawable.Icon
+import android.os.Build
+import org.json.JSONObject
+
+/** Banner heads-up nativo cuando la pantalla está encendida (sustituye la notificación Notifee). */
+object AgendaAlarmHeadsUp {
+  fun show(ctx: Context, notificationId: String, timeText: String, payloadJson: String) {
+    val app = ctx.applicationContext
+    val prefs = app.getSharedPreferences("AgendaAlarmPrefs", Context.MODE_PRIVATE)
+    prefs.edit()
+      .putString("payload_" + notificationId, payloadJson)
+      .putString("payload_current_id", notificationId)
+      .apply()
+
+    val payload = try {
+      JSONObject(payloadJson)
+    } catch (_: Exception) {
+      JSONObject()
+    }
+    val channelId = payload.optString("channelId", "agenda-event-phone-v5")
+    val eventTitle = payload.optString("displayTitle", payload.optString("titleSnapshot", "Evento"))
+    val reminderId = payload.optString("reminderId", "")
+    val alarmKind = payload.optString("alarmKind", "start")
+    val titleSnapshot = payload.optString("titleSnapshot", "Evento")
+    val startTimeSnapshot = payload.optString("startTimeSnapshot", "09:00")
+    val dateSnapshot = payload.optString("dateSnapshot", "2000-01-01")
+
+    val nm = app.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+    val bannerAction = app.packageName + ".ALARM_BANNER_ACTION"
+    val notifTag = notificationId.hashCode()
+
+    fun actionPending(bridgeAction: String): PendingIntent {
+      val intent = Intent(bannerAction).setPackage(app.packageName)
+      intent.setClass(app, AgendaAlarmBannerReceiver::class.java)
+      intent.putExtra("bridge_action", bridgeAction)
+      intent.putExtra("notification_id", notificationId)
+      intent.putExtra("reminder_id", reminderId)
+      intent.putExtra("alarm_kind", alarmKind)
+      intent.putExtra("title_snapshot", titleSnapshot)
+      intent.putExtra("start_time_snapshot", startTimeSnapshot)
+      intent.putExtra("date_snapshot", dateSnapshot)
+      val reqCode = (notificationId + bridgeAction).hashCode()
+      return PendingIntent.getBroadcast(
+        app,
+        reqCode,
+        intent,
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+      )
+    }
+
+    val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+      Notification.Builder(app, channelId)
+    } else {
+      @Suppress("DEPRECATION")
+      Notification.Builder(app)
+    }
+    builder
+      .setSmallIcon(R.drawable.ic_agenda_alarm)
+      .setContentTitle(timeText)
+      .setContentText(eventTitle)
+      .setCategory(Notification.CATEGORY_ALARM)
+      .setOngoing(true)
+      .setAutoCancel(false)
+      .setVisibility(Notification.VISIBILITY_PUBLIC)
+      .setPriority(Notification.PRIORITY_MAX)
+
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+      builder.addAction(
+        Notification.Action.Builder(
+          Icon.createWithResource(app, R.drawable.ic_agenda_snooze),
+          "Posponer",
+          actionPending("POSPONER"),
+        ).build(),
+      )
+      builder.addAction(
+        Notification.Action.Builder(
+          Icon.createWithResource(app, R.drawable.ic_agenda_stop),
+          "Detener",
+          actionPending("OK"),
+        ).build(),
+      )
+    }
+
+    nm.notify(notifTag, builder.build())
+  }
+
+  fun dismiss(ctx: Context, notificationId: String) {
+    val nm = ctx.applicationContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+    nm.cancel(notificationId.hashCode())
+  }
+}
+`;
+}
+
+function makeAgendaAlarmBannerReceiver(packageName) {
+  return `package ${packageName}
+
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import com.facebook.react.ReactApplication
+import com.facebook.react.bridge.Arguments
+import com.facebook.react.bridge.ReactContext
+import com.facebook.react.modules.core.DeviceEventManagerModule
+import org.json.JSONArray
+import org.json.JSONObject
+
+class AgendaAlarmBannerReceiver : BroadcastReceiver() {
+  override fun onReceive(context: Context, intent: Intent?) {
+    if (intent == null) return
+    val action = intent.getStringExtra("bridge_action") ?: return
+    val notificationId = intent.getStringExtra("notification_id") ?: ""
+    val reminderId = intent.getStringExtra("reminder_id") ?: return
+    val alarmKind = intent.getStringExtra("alarm_kind") ?: return
+    val titleSnapshot = intent.getStringExtra("title_snapshot") ?: "Evento"
+    val startTimeSnapshot = intent.getStringExtra("start_time_snapshot") ?: "09:00"
+    val dateSnapshot = intent.getStringExtra("date_snapshot") ?: "2000-01-01"
+
+    AgendaAlarmHeadsUp.dismiss(context, notificationId)
+    AgendaAlarmSound.stop(context.applicationContext)
+
+    if (!deliverToJs(context, action, reminderId, alarmKind, notificationId, titleSnapshot, startTimeSnapshot, dateSnapshot)) {
+      enqueuePendingAction(context, action, reminderId, alarmKind, notificationId, titleSnapshot, startTimeSnapshot, dateSnapshot)
+    }
+  }
+
+  private fun deliverToJs(
+    context: Context,
+    action: String,
+    reminderId: String,
+    alarmKind: String,
+    notificationId: String,
+    titleSnapshot: String,
+    startTimeSnapshot: String,
+    dateSnapshot: String,
+  ): Boolean {
+    val app = context.applicationContext as? ReactApplication ?: return false
+    val mgr = app.reactNativeHost.reactInstanceManager
+    val existing = mgr.currentReactContext
+    if (existing != null) {
+      emit(existing, action, reminderId, alarmKind, notificationId, titleSnapshot, startTimeSnapshot, dateSnapshot)
+      return true
+    }
+    return try {
+      mgr.addReactInstanceEventListener(object : com.facebook.react.ReactInstanceManager.ReactInstanceEventListener {
+        override fun onReactContextInitialized(ctx: ReactContext) {
+          emit(ctx, action, reminderId, alarmKind, notificationId, titleSnapshot, startTimeSnapshot, dateSnapshot)
+          mgr.removeReactInstanceEventListener(this)
+        }
+      })
+      if (!mgr.hasStartedCreatingInitialContext()) {
+        mgr.createReactContextInBackground()
+      }
+      true
+    } catch (_: Exception) {
+      false
+    }
+  }
+
+  private fun emit(
+    ctx: ReactContext,
+    action: String,
+    reminderId: String,
+    alarmKind: String,
+    notificationId: String,
+    titleSnapshot: String,
+    startTimeSnapshot: String,
+    dateSnapshot: String,
+  ) {
+    val map = Arguments.createMap()
+    map.putString("action", action)
+    map.putString("reminderId", reminderId)
+    map.putString("alarmKind", alarmKind)
+    map.putString("notificationId", notificationId)
+    map.putString("titleSnapshot", titleSnapshot)
+    map.putString("startTimeSnapshot", startTimeSnapshot)
+    map.putString("dateSnapshot", dateSnapshot)
+    ctx.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+      .emit("agenda:alarm-bridge", map)
+  }
+
+  private fun enqueuePendingAction(
+    context: Context,
+    action: String,
+    reminderId: String,
+    alarmKind: String,
+    notificationId: String,
+    titleSnapshot: String,
+    startTimeSnapshot: String,
+    dateSnapshot: String,
+  ) {
+    try {
+      val prefs = context.applicationContext.getSharedPreferences("AgendaAlarmPrefs", Context.MODE_PRIVATE)
+      val arr = try {
+        JSONArray(prefs.getString("pending_actions", "[]") ?: "[]")
+      } catch (_: Exception) {
+        JSONArray()
+      }
+      val obj = JSONObject()
+      obj.put("action", action)
+      obj.put("reminderId", reminderId)
+      obj.put("alarmKind", alarmKind)
+      obj.put("notificationId", notificationId)
+      obj.put("titleSnapshot", titleSnapshot)
+      obj.put("startTimeSnapshot", startTimeSnapshot)
+      obj.put("dateSnapshot", dateSnapshot)
+      arr.put(obj)
+      prefs.edit().putString("pending_actions", arr.toString()).apply()
+    } catch (_: Exception) {
+    }
+  }
+}
+`;
+}
+
 function makeMainActivityBridge(packageName) {
   return `package ${packageName}
 
@@ -391,6 +614,10 @@ import org.json.JSONObject
 
 class AlarmLockscreenActivity : Activity() {
 
+  companion object {
+    const val EXTRA_NOTIFICATION_ID = "agenda_alarm_notification_id"
+  }
+
   // Paleta clara fija: la alarma siempre se ve en tema claro.
   private val cBgTop = 0xFFEAF1FC.toInt()
   private val cBgBottom = 0xFFFFFFFF.toInt()
@@ -439,6 +666,13 @@ class AlarmLockscreenActivity : Activity() {
       cpuWakeLock?.setReferenceCounted(false)
       cpuWakeLock?.acquire(120_000L)
     } catch (_: Exception) {
+    }
+
+    intent?.getStringExtra(EXTRA_NOTIFICATION_ID)?.takeIf { it.isNotBlank() }?.let { notifId ->
+      getSharedPreferences("AgendaAlarmPrefs", Context.MODE_PRIVATE)
+        .edit()
+        .putString("payload_current_id", notifId)
+        .apply()
     }
 
     // Esta Activity es la UNICA interfaz de alarma: reproduce el sonido y descarta cualquier
@@ -938,6 +1172,8 @@ function injectMainActivity(main) {
 }
 
 function withAlarmLockscreenManifest(config) {
+  const pkg = config.android?.package;
+  if (!pkg) return config;
   return withAndroidManifest(config, (cfg) => {
     const app = cfg.modResults.manifest.application?.[0];
     if (!app) return cfg;
@@ -991,6 +1227,8 @@ function withAgendaAlarmLockscreen(config) {
 
       fs.writeFileSync(path.join(javaDir, 'AgendaAlarmMainActivityBridge.kt'), makeMainActivityBridge(pkg), 'utf8');
       fs.writeFileSync(path.join(javaDir, 'AgendaAlarmSound.kt'), makeAlarmSound(pkg), 'utf8');
+      fs.writeFileSync(path.join(javaDir, 'AgendaAlarmHeadsUp.kt'), makeAgendaAlarmHeadsUp(pkg), 'utf8');
+      fs.writeFileSync(path.join(javaDir, 'AgendaAlarmBannerReceiver.kt'), makeAgendaAlarmBannerReceiver(pkg), 'utf8');
       fs.writeFileSync(path.join(javaDir, 'AgendaAlarmNativeModule.kt'), makeNativeModule(pkg), 'utf8');
       fs.writeFileSync(path.join(javaDir, 'AgendaAlarmNativePackage.kt'), makeNativePackage(pkg), 'utf8');
       fs.writeFileSync(path.join(javaDir, 'AlarmLockscreenActivity.kt'), makeLockscreenActivity(pkg), 'utf8');
