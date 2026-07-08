@@ -26,7 +26,6 @@ import {
   openAndroidAppNotificationSettings,
   openAndroidAppDetailsSettings,
   openAndroidExactAlarmPermissionSettings,
-  openAndroidManageFullScreenIntentSettings,
   openAndroidOverlayPermissionSettings,
   resyncAllScheduledNotifications,
   type AndroidAlarmWakeDiagnostics,
@@ -510,14 +509,6 @@ export function OptionsScreen({ onClose, selectedDate, onDayScheduleSaved }: Opt
           >
             <Text style={styles.androidBtnText}>Ajustes de notificación de la app</Text>
           </TouchableOpacity>
-          {typeof Platform.Version === 'number' && Platform.Version >= 34 ? (
-            <TouchableOpacity
-              style={styles.androidBtn}
-              onPress={() => void openAndroidManageFullScreenIntentSettings()}
-            >
-              <Text style={styles.androidBtnText}>Permitir pantalla completa en alarmas</Text>
-            </TouchableOpacity>
-          ) : null}
           <TouchableOpacity
             style={styles.androidBtn}
             onPress={() => void openAndroidOverlayPermissionSettings()}

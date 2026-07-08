@@ -1,7 +1,7 @@
 /**
  * Android: manifest (showWhenLocked / turnScreenOn) + inyección en MainActivity.onCreate
  * para que al abrir por notificación / full-screen intent la ventana pueda encender pantalla.
- * Notifee puede mostrar full-screen intent; el manifest ya incluye USE_FULL_SCREEN_INTENT.
+ * MainActivity con showWhenLocked/turnScreenOn al abrir por notificación (sin USE_FULL_SCREEN_INTENT en manifest).
  */
 const fs = require('fs');
 const path = require('path');

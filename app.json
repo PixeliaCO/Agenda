@@ -3,7 +3,7 @@
     "name": "Palm",
     "slug": "palm",
     "scheme": "agendapalm",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -23,8 +23,10 @@
         "android.permission.POST_NOTIFICATIONS",
         "android.permission.VIBRATE",
         "android.permission.WAKE_LOCK",
-        "android.permission.USE_FULL_SCREEN_INTENT",
         "android.permission.SYSTEM_ALERT_WINDOW"
+      ],
+      "blockedPermissions": [
+        "android.permission.USE_FULL_SCREEN_INTENT"
       ],
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
@@ -35,6 +37,7 @@
       "package": "com.warrioxproductionss.agendapalm"
     },
     "plugins": [
+      "./plugins/withAndroidReleaseSigning.js",
       "./plugins/withNotifeeMavenRepo.js",
       "./plugins/withAgendaSystemAlarmChannel.js",
       "./plugins/withAgendaFullScreenAlarm.js",

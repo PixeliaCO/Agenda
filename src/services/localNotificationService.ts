@@ -320,36 +320,29 @@ let alarmLaunchPermissionsPromptedThisSession = false;
 
 /**
  * Comprueba y pide permisos para que la Lock Screen se abra sola (sin tocar el banner).
- * Overlay = obligatorio con pantalla desbloqueada; FSI = pantalla bloqueada (API 34+).
+ * Overlay = pantalla desbloqueada. Sin USE_FULL_SCREEN_INTENT en manifest no se pide FSI.
  */
 export async function ensureAlarmLaunchPermissions(options?: {
   force?: boolean;
 }): Promise<{ overlay: boolean; fsi: boolean }> {
   let overlay = await androidCanDrawOverlays();
-  let fsi = await androidCanUseFullScreenIntent();
-  const api = androidApiLevel();
   const needsOverlay = !overlay;
-  const needsFsi = api >= 34 && !fsi;
 
-  if (!needsOverlay && !needsFsi) {
-    return { overlay, fsi };
+  if (!needsOverlay) {
+    return { overlay, fsi: false };
   }
 
   if (!options?.force && alarmLaunchPermissionsPromptedThisSession) {
-    return { overlay, fsi };
+    return { overlay, fsi: false };
   }
 
-  if (needsFsi) {
-    await openAndroidManageFullScreenIntentSettings();
-  }
   if (needsOverlay) {
     await openAndroidOverlayPermissionSettings();
   }
   alarmLaunchPermissionsPromptedThisSession = true;
 
   overlay = await androidCanDrawOverlays();
-  fsi = await androidCanUseFullScreenIntent();
-  return { overlay, fsi };
+  return { overlay, fsi: false };
 }
 
 /** @deprecated Usar ensureAlarmLaunchPermissions */
@@ -631,7 +624,6 @@ function buildAlarmBannerActions(): NonNullable<
 function alarmBannerAndroidBase(
   channelId: string,
   lockLa: string | undefined,
-  fullScreenId: string,
 ): NonNullable<Notification["android"]> {
   const config = {
     channelId,
@@ -644,9 +636,6 @@ function alarmBannerAndroidBase(
     pressAction: lockLa
       ? { id: ACTION_DEFAULT_PRESS, launchActivity: lockLa }
       : { id: ACTION_DEFAULT_PRESS, launchActivity: "default" },
-    fullScreenAction: lockLa
-      ? { id: fullScreenId, launchActivity: lockLa }
-      : { id: fullScreenId, launchActivity: "default" },
     lightUpScreen: true,
     actions: buildAlarmBannerActions(),
     localOnly: true,
@@ -1601,11 +1590,7 @@ function buildAnticipationNotification(
     body: eventTitle,
     subtitle: eventTitle,
     data: toDataStrings(p),
-    android: alarmBannerAndroidBase(
-      ANDROID_CHANNEL_ANTICIPATION,
-      lockLa,
-      "agenda_fs_anticipation",
-    ),
+    android: alarmBannerAndroidBase(ANDROID_CHANNEL_ANTICIPATION, lockLa),
   };
 }
 
@@ -1624,11 +1609,7 @@ function buildStartNotification(
     body: eventTitle,
     subtitle: eventTitle,
     data: toDataStrings(p),
-    android: alarmBannerAndroidBase(
-      ANDROID_CHANNEL_EVENT_START,
-      lockLa,
-      "agenda_fs",
-    ),
+    android: alarmBannerAndroidBase(ANDROID_CHANNEL_EVENT_START, lockLa),
   };
 }
 
