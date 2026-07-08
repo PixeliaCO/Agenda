@@ -32,6 +32,11 @@ yarn-error.*
 # local env files
 .env*.local
 
+# Android signing (local credentials for EAS Build)
+credentials.json
+credentials/android/.keystore-pass.tmp
+credentials/android/.key-pass.tmp
+
 # typescript
 *.tsbuildinfo
 
