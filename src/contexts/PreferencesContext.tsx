@@ -1,5 +1,5 @@
 /**
- * Preferencias de la agenda: tamaño de letra, modo oscuro y rango horario del día.
+ * Preferencias de la agenda: tamaño de letra, modo oscuro, hora militar y rango horario del día.
  */
 
 import React, { createContext, useContext, useState, useCallback, useMemo, useEffect } from 'react';
@@ -12,6 +12,8 @@ export type FontSizeKey = 'small' | 'normal' | 'large';
 export type Preferences = {
   fontSize: FontSizeKey;
   darkMode: boolean;
+  /** Hora militar (24h). Por defecto activada. */
+  useMilitaryTime: boolean;
   scheduleStartHour: number;
   scheduleEndHour: number;
   /** Minutos para «Recordar nuevamente» (posponer alarma). */
@@ -25,6 +27,7 @@ export type Preferences = {
 const DEFAULT_PREFERENCES: Preferences = {
   fontSize: 'normal',
   darkMode: false,
+  useMilitaryTime: true,
   scheduleStartHour: 6,
   scheduleEndHour: 22,
   alarmSnoozeMinutes: 5,
@@ -50,6 +53,8 @@ function sanitizePreferences(input: unknown): Preferences {
       ? p.fontSize
       : DEFAULT_PREFERENCES.fontSize;
   const darkMode = typeof p.darkMode === 'boolean' ? p.darkMode : DEFAULT_PREFERENCES.darkMode;
+  const useMilitaryTime =
+    typeof p.useMilitaryTime === 'boolean' ? p.useMilitaryTime : DEFAULT_PREFERENCES.useMilitaryTime;
   const scheduleStartHour = clampHour((p as any).scheduleStartHour ?? DEFAULT_PREFERENCES.scheduleStartHour);
   const scheduleEndHour = clampHour((p as any).scheduleEndHour ?? DEFAULT_PREFERENCES.scheduleEndHour);
   const orderedStart = Math.min(scheduleStartHour, scheduleEndHour);
@@ -67,6 +72,7 @@ function sanitizePreferences(input: unknown): Preferences {
   return {
     fontSize,
     darkMode,
+    useMilitaryTime,
     scheduleStartHour: orderedStart,
     scheduleEndHour: orderedEnd,
     alarmSnoozeMinutes,
@@ -91,6 +97,7 @@ type PreferencesContextValue = {
   preferences: Preferences;
   setFontSize: (key: FontSizeKey) => void;
   setDarkMode: (on: boolean) => void;
+  setUseMilitaryTime: (on: boolean) => void;
   setScheduleHours: (start: number, end: number) => void;
   setAlarmBehavior: (snoozeMinutes: number, repeatIntervalMinutes: number, repeatCount: number) => void;
   fontScale: number;
@@ -128,6 +135,10 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
     setPreferences((p) => ({ ...p, darkMode }));
   }, []);
 
+  const setUseMilitaryTime = useCallback((useMilitaryTime: boolean) => {
+    setPreferences((p) => ({ ...p, useMilitaryTime }));
+  }, []);
+
   const setScheduleHours = useCallback((scheduleStartHour: number, scheduleEndHour: number) => {
     const start = clampHour(scheduleStartHour);
     const end = clampHour(scheduleEndHour);
@@ -160,12 +171,22 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
       preferences,
       setFontSize,
       setDarkMode,
+      setUseMilitaryTime,
       setScheduleHours,
       setAlarmBehavior,
       fontScale,
       colors,
     }),
-    [preferences, setFontSize, setDarkMode, setScheduleHours, setAlarmBehavior, fontScale, colors]
+    [
+      preferences,
+      setFontSize,
+      setDarkMode,
+      setUseMilitaryTime,
+      setScheduleHours,
+      setAlarmBehavior,
+      fontScale,
+      colors,
+    ]
   );
 
   return <PreferencesContext.Provider value={value}>{children}</PreferencesContext.Provider>;

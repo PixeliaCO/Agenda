@@ -12,6 +12,7 @@ import type {
   TimestampTrigger,
 } from "@notifee/react-native";
 import {
+  Alert,
   AppState,
   DeviceEventEmitter,
   NativeModules,
@@ -99,7 +100,7 @@ const ANDROID_FSI_PROMPT_KEY = "agenda_android_fsi_settings_prompt_v1";
 /** "Mostrar sobre otras apps": permite que la alarma abra la pantalla completa estando en otra app (desbloqueado). */
 const ANDROID_OVERLAY_PROMPT_KEY = "agenda_android_overlay_settings_prompt_v1";
 const ANDROID_SETTINGS_MANAGE_OVERLAY =
-  "android.settings.MANAGE_OVERLAY_PERMISSION";
+  IntentLauncher.ActivityAction.MANAGE_OVERLAY_PERMISSION;
 const ANDROID_EXTRA_APP_PACKAGE = "android.provider.extra.APP_PACKAGE";
 
 /** Evita spam en consola si hay muchos recordatorios y alarmas exactas están desactivadas. */
@@ -310,8 +311,8 @@ export async function openAndroidOverlayPermissionSettings(): Promise<void> {
     await IntentLauncher.startActivityAsync(ANDROID_SETTINGS_MANAGE_OVERLAY, {
       data: `package:${pkg}`,
     });
-  } catch {
-    /* */
+  } catch (e) {
+    console.warn("[HeadsUp] abrir ajustes overlay falló", e);
   }
 }
 
@@ -345,9 +346,25 @@ export async function ensureAlarmLaunchPermissions(options?: {
   return { overlay, fsi: false };
 }
 
-/** @deprecated Usar ensureAlarmLaunchPermissions */
-async function ensureAlarmLaunchPermissionsOnce(): Promise<void> {
-  await ensureAlarmLaunchPermissions();
+/**
+ * Sin "Mostrar sobre otras apps" la alarma NO puede abrirse a pantalla completa en segundo plano
+ * (Android bloquea el Background Activity Start). Pide el permiso con un diálogo que explica por qué;
+ * abre Ajustes solo si el usuario acepta, así el aviso no lo traga el propio salto a Ajustes.
+ */
+async function promptOverlayPermissionIfNeeded(): Promise<void> {
+  if (Platform.OS !== "android") return;
+  if (await androidCanDrawOverlays()) return;
+  Alert.alert(
+    "Permiso para alarmas",
+    "Para que la alarma aparezca en pantalla aunque la app esté en segundo plano, activa “Mostrar sobre otras apps”.",
+    [
+      { text: "Ahora no", style: "cancel" },
+      {
+        text: "Abrir ajustes",
+        onPress: () => void openAndroidOverlayPermissionSettings(),
+      },
+    ],
+  );
 }
 
 async function maybeOpenAndroidExactAlarmSettingsOnce(): Promise<void> {
@@ -609,12 +626,12 @@ function buildAlarmBannerActions(): NonNullable<
 >["actions"] {
   return [
     {
-      title: "Posponer",
+      title: "Intermitente",
       icon: "ic_agenda_snooze",
       pressAction: { id: ACTION_POSPONER },
     },
     {
-      title: "Detener",
+      title: "Borrar",
       icon: "ic_agenda_stop",
       pressAction: { id: ACTION_OK },
     },
@@ -725,6 +742,15 @@ function activateNativeLockScreenPayload(notificationId: string | undefined): vo
 let lastLockScreenPresentedId: string | null = null;
 let lastLockScreenPresentedAt = 0;
 let lockScreenPresentInFlight = false;
+
+/** Debug: último disparo de Lock Screen (ms) para correlacionar con AppState/home. */
+export function getLastAlarmLockScreenPresentedAt(): number {
+  return lastLockScreenPresentedAt;
+}
+
+export function getLastAlarmLockScreenPresentedId(): string | null {
+  return lastLockScreenPresentedId;
+}
 /** Evita OK automático al cancelar Notifee para mostrar banner nativo. */
 let suppressNextDismissedForNativeBanner = false;
 /** Evita bucle al refrescar texto del banner con displayNotification. */
@@ -757,6 +783,7 @@ async function presentNativeAlarmHeadsUpBanner(
     notificationId: notification.id,
   };
 
+  console.log("[HeadsUp] cancel Notifee + show native id=" + notification.id);
   suppressNextDismissedForNativeBanner = true;
   try {
     await notifee?.cancelNotification(notification.id);
@@ -770,8 +797,8 @@ async function presentNativeAlarmHeadsUpBanner(
       bannerTimeFromNotification(notification, reminder),
       JSON.stringify(payload),
     );
-  } catch {
-    /* */
+  } catch (e) {
+    console.log("[HeadsUp] showAlarmHeadsUpBanner threw", e);
   }
 }
 
@@ -836,23 +863,32 @@ async function presentAlarmLockScreenIfNeeded(
 
     startNativeAlarmSound();
 
-    if (!screenOn) {
-      const mod = NativeModules.AgendaAlarmNative as
-        | { launchLockScreenActivity?: (id: string) => void }
-        | undefined;
-      if (typeof mod?.launchLockScreenActivity === "function") {
-        mod.launchLockScreenActivity(notification.id);
-      }
-      lastLockScreenPresentedId = notification.id;
-      lastLockScreenPresentedAt = now;
-      return;
+    // Alarma a pantalla completa siempre (pantalla encendida o apagada): la Activity persiste
+    // hasta Detener/Posponer. El heads-up no servía: Android colapsa el peek a los ~5s.
+    const mod = NativeModules.AgendaAlarmNative as
+      | { launchLockScreenActivity?: (id: string) => void }
+      | undefined;
+    const appStateNow = AppState.currentState;
+    // #region agent log
+    fetch('http://127.0.0.1:7821/ingest/cf7ef631-2bd2-4213-9fe4-80b638efc445',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'9ba604'},body:JSON.stringify({sessionId:'9ba604',runId:'pre-fix',hypothesisId:'H1-H2',location:'localNotificationService.ts:presentAlarmLockScreenIfNeeded',message:'launch lock screen',data:{notificationId:notification.id,screenOn,appStateNow,hasLaunchFn:typeof mod?.launchLockScreenActivity==='function'},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
+    console.log(
+      "[HeadsUp] launch full-screen alarm id=" + notification.id,
+    );
+    if (typeof mod?.launchLockScreenActivity === "function") {
+      mod.launchLockScreenActivity(notification.id);
     }
-
-    // Pantalla encendida: refrescar banner con hora + título del evento.
-    await refreshDeliveredAlarmBanner(displayNotification);
-    await presentNativeAlarmHeadsUpBanner(displayNotification, r);
     lastLockScreenPresentedId = notification.id;
     lastLockScreenPresentedAt = now;
+
+    // #region agent log
+    // Si MainActivity (home) también sale sobre el lock, AppState suele quedar/volver a 'active'.
+    setTimeout(() => {
+      const afterState = AppState.currentState;
+      const msSince = Date.now() - now;
+      fetch('http://127.0.0.1:7821/ingest/cf7ef631-2bd2-4213-9fe4-80b638efc445',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'9ba604'},body:JSON.stringify({sessionId:'9ba604',runId:'pre-fix',hypothesisId:'H1-H3',location:'localNotificationService.ts:presentAlarmLockScreenIfNeeded+800ms',message:'app state after lock launch',data:{notificationId:notification.id,screenOnAtLaunch:screenOn,appStateAfter:afterState,msSince,lastId:lastLockScreenPresentedId},timestamp:Date.now()})}).catch(()=>{});
+    }, 800);
+    // #endregion
   } finally {
     lockScreenPresentInFlight = false;
   }
@@ -866,8 +902,15 @@ async function dispatchNativeAlarmAction(
   const reminderId = o.reminderId;
   const alarmKind = o.alarmKind;
   const notificationId = o.notificationId ?? "";
-  if (typeof actionRaw !== "string" || typeof reminderId !== "string") return;
-  if (alarmKind !== "anticipation" && alarmKind !== "start") return;
+  console.log("[AgendaAlarmBridge] dispatchNativeAlarmAction", JSON.stringify(o));
+  if (typeof actionRaw !== "string" || typeof reminderId !== "string") {
+    console.warn("[AgendaAlarmBridge] dispatchNativeAlarmAction: actionRaw/reminderId invalidos, descartado", o);
+    return;
+  }
+  if (alarmKind !== "anticipation" && alarmKind !== "start") {
+    console.warn("[AgendaAlarmBridge] dispatchNativeAlarmAction: alarmKind invalido, descartado", alarmKind);
+    return;
+  }
 
   const map: Record<string, string> = {
     OK: ACTION_OK,
@@ -896,6 +939,7 @@ async function dispatchNativeAlarmAction(
 }
 
 async function handleNativeAlarmBridge(ev: unknown): Promise<void> {
+  console.log("[AgendaAlarmBridge] agenda:alarm-bridge recibido en JS", JSON.stringify(ev));
   if (!isAndroidNotifications()) return;
   if (isExpoGoEnvironment()) return;
   await initLocalNotifications();
@@ -916,11 +960,12 @@ async function drainPendingAlarmActions(): Promise<void> {
     const raw = await mod.consumePendingAlarmActions();
     const list = JSON.parse(raw) as Array<Partial<NativeAlarmBridgePayload>>;
     if (!Array.isArray(list)) return;
+    console.log("[AgendaAlarmBridge] drainPendingAlarmActions: " + list.length + " pendientes");
     for (const o of list) {
       await dispatchNativeAlarmAction(o);
     }
-  } catch {
-    /* */
+  } catch (e) {
+    console.warn("[AgendaAlarmBridge] drainPendingAlarmActions fallo", e);
   }
 }
 
@@ -928,6 +973,7 @@ async function drainPendingAlarmActions(): Promise<void> {
 export function ensureAgendaAlarmBridgeListener(): void {
   if (!isAndroidNotifications() || isExpoGoEnvironment()) return;
   if (alarmBridgeSub) return;
+  console.log("[AgendaAlarmBridge] ensureAgendaAlarmBridgeListener: listener registrado");
   alarmBridgeSub = DeviceEventEmitter.addListener(
     NATIVE_ALARM_BRIDGE,
     (ev: unknown) => {
@@ -989,6 +1035,10 @@ async function dismissAlarmNotification(
   notificationId: string | undefined,
 ): Promise<void> {
   if (!notificationId) return;
+  console.log(
+    "[HeadsUp] dismissAlarmNotification id=" + notificationId,
+    new Error("dismiss-caller").stack,
+  );
   try {
     await notifee.cancelDisplayedNotification(notificationId);
   } catch {
@@ -1143,11 +1193,26 @@ async function handleAlarmInteraction(
   notification: Notification | undefined,
 ): Promise<void> {
   const id = normalizeActionId(actionId);
+  console.log(
+    "[HeadsUp] handleAlarmInteraction action=" +
+      id +
+      " nid=" +
+      (notification?.id ?? "?"),
+    new Error("interaction-caller").stack,
+  );
   if (!isAlarmAction(id)) return;
 
   const payload = parseAlarmPayload(
     notification?.data as Record<string, unknown> | undefined,
   );
+  if (!payload) {
+    console.warn(
+      "[HeadsUp] handleAlarmInteraction: parseAlarmPayload devolvio null, se descarta la accion. data=",
+      JSON.stringify(notification?.data),
+    );
+  } else {
+    console.log("[HeadsUp] handleAlarmInteraction payload=", JSON.stringify(payload));
+  }
   const nid = notification?.id;
   const behavior = await getAlarmBehaviorSettings();
 
@@ -1193,10 +1258,10 @@ async function handleAlarmInteraction(
     return;
   }
 
-  /** Reprogramar: abre la app para elegir nueva hora; cancela todo y se reprograma al guardar. */
+  /** Reprogramar: abre la app en el detalle del evento; solo se cancela/reprograma al guardar. */
   if (payload && isReprogramar) {
-    await recordAckFromPayload(payload, "rescheduled");
-    await cancelNotificationsForReminder(payload.reminderId);
+    console.log("[HeadsUp] REPROGRAMAR reminderId=" + payload.reminderId + ": emitiendo REMINDER_RESCHEDULE_FROM_NOTIFICATION");
+    await cancelOccurrenceRings(payload.reminderId, payload.alarmKind);
     pendingRescheduleReminderId = payload.reminderId;
     DeviceEventEmitter.emit(REMINDER_RESCHEDULE_FROM_NOTIFICATION, {
       reminderId: payload.reminderId,
@@ -1271,6 +1336,14 @@ export async function handleNotifeeBackgroundEvent(
   if (Platform.OS !== "android") return;
   const { type, detail } = event;
   const { notification, pressAction } = detail;
+  console.log(
+    "[HeadsUp] bgEvent type=" +
+      type +
+      " nid=" +
+      (notification?.id ?? "?") +
+      " press=" +
+      (pressAction?.id ?? "-"),
+  );
 
   if (type === EventType.DELIVERED && notification) {
     if (suppressNextDeliveredForBannerRefresh) {
@@ -1662,6 +1735,14 @@ async function performInitLocalNotifications(): Promise<void> {
     ensureAgendaAlarmBridgeListener();
     foregroundUnsub = notifee.onForegroundEvent(({ type, detail }) => {
       const { notification, pressAction } = detail;
+      console.log(
+        "[HeadsUp] fgEvent type=" +
+          type +
+          " nid=" +
+          (notification?.id ?? "?") +
+          " press=" +
+          (pressAction?.id ?? "-"),
+      );
       if (type === EventType.DELIVERED && notification) {
         if (suppressNextDeliveredForBannerRefresh) {
           suppressNextDeliveredForBannerRefresh = false;
@@ -1738,8 +1819,9 @@ async function performInitLocalNotifications(): Promise<void> {
 
     setTimeout(() => {
       void (async () => {
+        // Overlay primero (con diálogo, no abre Ajustes por sí solo → no lo traga el background-start).
+        await promptOverlayPermissionIfNeeded();
         await maybeOpenAndroidExactAlarmSettingsOnce();
-        await ensureAlarmLaunchPermissionsOnce();
       })();
     }, 2500);
   } catch (e) {

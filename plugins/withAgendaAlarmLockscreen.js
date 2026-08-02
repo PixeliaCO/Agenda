@@ -122,10 +122,13 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.drawable.Icon
 import android.os.Build
+import android.util.Log
 import org.json.JSONObject
 
 /** Banner heads-up nativo cuando la pantalla está encendida (sustituye la notificación Notifee). */
 object AgendaAlarmHeadsUp {
+  private const val TAG = "AgendaHeadsUp"
+
   fun show(ctx: Context, notificationId: String, timeText: String, payloadJson: String) {
     val app = ctx.applicationContext
     val prefs = app.getSharedPreferences("AgendaAlarmPrefs", Context.MODE_PRIVATE)
@@ -190,23 +193,25 @@ object AgendaAlarmHeadsUp {
       builder.addAction(
         Notification.Action.Builder(
           Icon.createWithResource(app, R.drawable.ic_agenda_snooze),
-          "Posponer",
+          "Intermitente",
           actionPending("POSPONER"),
         ).build(),
       )
       builder.addAction(
         Notification.Action.Builder(
           Icon.createWithResource(app, R.drawable.ic_agenda_stop),
-          "Detener",
+          "Borrar",
           actionPending("OK"),
         ).build(),
       )
     }
 
+    Log.d(TAG, "show id=" + notificationId + " tag=" + notifTag + " channel=" + channelId)
     nm.notify(notifTag, builder.build())
   }
 
   fun dismiss(ctx: Context, notificationId: String) {
+    Log.d(TAG, "dismiss id=" + notificationId + " tag=" + notificationId.hashCode())
     val nm = ctx.applicationContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
     nm.cancel(notificationId.hashCode())
   }
@@ -220,6 +225,7 @@ function makeAgendaAlarmBannerReceiver(packageName) {
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.util.Log
 import com.facebook.react.ReactApplication
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.ReactContext
@@ -238,12 +244,54 @@ class AgendaAlarmBannerReceiver : BroadcastReceiver() {
     val startTimeSnapshot = intent.getStringExtra("start_time_snapshot") ?: "09:00"
     val dateSnapshot = intent.getStringExtra("date_snapshot") ?: "2000-01-01"
 
+    Log.d("AgendaHeadsUp", "receiver action=" + action + " id=" + notificationId)
     AgendaAlarmHeadsUp.dismiss(context, notificationId)
     AgendaAlarmSound.stop(context.applicationContext)
+
+    // Reprogramar: unica accion que abre la app (para editar el evento). El banner es un receiver
+    // y no trae la app al frente; hay que lanzarla con los extras del bridge, como la Lock Screen.
+    // Se encola tambien como pending_action por si el emit en vivo se pierde en un arranque en frio.
+    if (action == "REPROGRAMAR") {
+      Log.d("AgendaHeadsUp", "banner REPROGRAMAR reminderId=" + reminderId + " alarmKind=" + alarmKind)
+      enqueuePendingAction(context, action, reminderId, alarmKind, notificationId, titleSnapshot, startTimeSnapshot, dateSnapshot)
+      launchAppWithAction(context, action, reminderId, alarmKind, notificationId, titleSnapshot, startTimeSnapshot, dateSnapshot)
+      return
+    }
 
     if (!deliverToJs(context, action, reminderId, alarmKind, notificationId, titleSnapshot, startTimeSnapshot, dateSnapshot)) {
       enqueuePendingAction(context, action, reminderId, alarmKind, notificationId, titleSnapshot, startTimeSnapshot, dateSnapshot)
     }
+  }
+
+  private fun launchAppWithAction(
+    context: Context,
+    action: String,
+    reminderId: String,
+    alarmKind: String,
+    notificationId: String,
+    titleSnapshot: String,
+    startTimeSnapshot: String,
+    dateSnapshot: String,
+  ) {
+    val launch = context.packageManager.getLaunchIntentForPackage(context.packageName)
+    if (launch == null) {
+      Log.w("AgendaHeadsUp", "launchAppWithAction: getLaunchIntentForPackage=null, no se pudo abrir la app")
+      return
+    }
+    launch.addFlags(
+      Intent.FLAG_ACTIVITY_NEW_TASK or
+        Intent.FLAG_ACTIVITY_CLEAR_TOP or
+        Intent.FLAG_ACTIVITY_SINGLE_TOP
+    )
+    launch.putExtra(AgendaAlarmMainActivityBridge.EXTRA_ACTION, action)
+    launch.putExtra(AgendaAlarmMainActivityBridge.EXTRA_REMINDER_ID, reminderId)
+    launch.putExtra(AgendaAlarmMainActivityBridge.EXTRA_ALARM_KIND, alarmKind)
+    launch.putExtra(AgendaAlarmMainActivityBridge.EXTRA_NOTIF_ID, notificationId)
+    launch.putExtra(AgendaAlarmMainActivityBridge.EXTRA_TITLE_SNAPSHOT, titleSnapshot)
+    launch.putExtra(AgendaAlarmMainActivityBridge.EXTRA_START_TIME_SNAPSHOT, startTimeSnapshot)
+    launch.putExtra(AgendaAlarmMainActivityBridge.EXTRA_DATE_SNAPSHOT, dateSnapshot)
+    Log.d("AgendaHeadsUp", "launchAppWithAction extras action=" + action + " reminderId=" + reminderId)
+    context.startActivity(launch)
   }
 
   private fun deliverToJs(
@@ -328,7 +376,9 @@ class AgendaAlarmBannerReceiver : BroadcastReceiver() {
       obj.put("dateSnapshot", dateSnapshot)
       arr.put(obj)
       prefs.edit().putString("pending_actions", arr.toString()).apply()
-    } catch (_: Exception) {
+      Log.d("AgendaHeadsUp", "enqueuePendingAction guardado action=" + action + " reminderId=" + reminderId + " total=" + arr.length())
+    } catch (e: Exception) {
+      Log.w("AgendaHeadsUp", "enqueuePendingAction fallo: " + e.message)
     }
   }
 }
@@ -340,6 +390,7 @@ function makeMainActivityBridge(packageName) {
 
 import android.app.Activity
 import android.content.Intent
+import android.util.Log
 import com.facebook.react.ReactApplication
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.ReactContext
@@ -355,26 +406,49 @@ object AgendaAlarmMainActivityBridge {
   val EXTRA_DATE_SNAPSHOT = "agenda_alarm_bridge_date_snapshot"
 
   fun dispatchFromIntent(activity: Activity, intent: Intent?) {
-    if (intent == null) return
-    val action = intent.getStringExtra(EXTRA_ACTION) ?: return
-    val reminderId = intent.getStringExtra(EXTRA_REMINDER_ID) ?: return
-    val alarmKind = intent.getStringExtra(EXTRA_ALARM_KIND) ?: return
+    if (intent == null) {
+      Log.d("AgendaAlarmBridge", "dispatchFromIntent: intent=null")
+      return
+    }
+    val action = intent.getStringExtra(EXTRA_ACTION)
+    if (action == null) {
+      Log.d("AgendaAlarmBridge", "dispatchFromIntent: sin EXTRA_ACTION, no-op")
+      return
+    }
+    val reminderId = intent.getStringExtra(EXTRA_REMINDER_ID)
+    if (reminderId == null) {
+      Log.w("AgendaAlarmBridge", "dispatchFromIntent: sin EXTRA_REMINDER_ID, no-op action=" + action)
+      return
+    }
+    val alarmKind = intent.getStringExtra(EXTRA_ALARM_KIND)
+    if (alarmKind == null) {
+      Log.w("AgendaAlarmBridge", "dispatchFromIntent: sin EXTRA_ALARM_KIND, no-op action=" + action)
+      return
+    }
     val notificationId = intent.getStringExtra(EXTRA_NOTIF_ID) ?: ""
     val titleSnapshot = intent.getStringExtra(EXTRA_TITLE_SNAPSHOT) ?: "Evento"
     val startTimeSnapshot = intent.getStringExtra(EXTRA_START_TIME_SNAPSHOT) ?: "09:00"
     val dateSnapshot = intent.getStringExtra(EXTRA_DATE_SNAPSHOT) ?: "2000-01-01"
 
+    Log.d("AgendaAlarmBridge", "dispatchFromIntent action=" + action + " reminderId=" + reminderId + " alarmKind=" + alarmKind)
     intent.removeExtra(EXTRA_ACTION)
 
-    val app = activity.application as? ReactApplication ?: return
+    val app = activity.application as? ReactApplication
+    if (app == null) {
+      Log.w("AgendaAlarmBridge", "dispatchFromIntent: application no es ReactApplication, no-op")
+      return
+    }
     val mgr = app.reactNativeHost.reactInstanceManager
     val existing = mgr.currentReactContext
     if (existing != null) {
+      Log.d("AgendaAlarmBridge", "dispatchFromIntent: reactContext ya listo, emit inmediato")
       emit(existing, action, reminderId, alarmKind, notificationId, titleSnapshot, startTimeSnapshot, dateSnapshot)
       return
     }
+    Log.d("AgendaAlarmBridge", "dispatchFromIntent: reactContext no listo, difiriendo con ReactInstanceEventListener")
     val listener = object : com.facebook.react.ReactInstanceManager.ReactInstanceEventListener {
       override fun onReactContextInitialized(context: ReactContext) {
+        Log.d("AgendaAlarmBridge", "onReactContextInitialized: emitiendo action=" + action + " reminderId=" + reminderId)
         emit(context, action, reminderId, alarmKind, notificationId, titleSnapshot, startTimeSnapshot, dateSnapshot)
         mgr.removeReactInstanceEventListener(this)
       }
@@ -400,6 +474,7 @@ object AgendaAlarmMainActivityBridge {
     map.putString("titleSnapshot", titleSnapshot)
     map.putString("startTimeSnapshot", startTimeSnapshot)
     map.putString("dateSnapshot", dateSnapshot)
+    Log.d("AgendaAlarmBridge", "emit agenda:alarm-bridge action=" + action + " reminderId=" + reminderId)
     ctx.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
       .emit("agenda:alarm-bridge", map)
   }
@@ -602,6 +677,7 @@ import android.os.PowerManager
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
+import android.util.Log
 import android.view.Gravity
 import android.view.WindowManager
 import android.widget.Button
@@ -694,8 +770,26 @@ class AlarmLockscreenActivity : Activity() {
     val startTimeSnapshot = payload.optString("startTimeSnapshot", "09:00")
     val dateSnapshot = payload.optString("dateSnapshot", "2000-01-01")
     val fireTimeSnapshot = payload.optString("fireTimeSnapshot", startTimeSnapshot)
-    val snoozeMinutes = payload.optInt("snoozeMinutes", 5).coerceIn(1, 120)
-    val snoozeLabel = "Recordar en " + snoozeMinutes + " min"
+    Log.d("AgendaAlarm", "LockscreenActivity onCreate reminderId=" + reminderId + " alarmKind=" + alarmKind + " notifId=" + notificationId)
+    // #region agent log
+    try {
+      Thread {
+        try {
+          val url = java.net.URL("http://127.0.0.1:7821/ingest/cf7ef631-2bd2-4213-9fe4-80b638efc445")
+          val conn = url.openConnection() as java.net.HttpURLConnection
+          conn.requestMethod = "POST"
+          conn.setRequestProperty("Content-Type", "application/json")
+          conn.setRequestProperty("X-Debug-Session-Id", "9ba604")
+          conn.doOutput = true
+          val body = """{"sessionId":"9ba604","runId":"pre-fix","hypothesisId":"H2","location":"AlarmLockscreenActivity.kt:onCreate","message":"lock screen only UI","data":{"reminderId":"$reminderId","notifId":"$notificationId","alarmKind":"$alarmKind"},"timestamp":\${System.currentTimeMillis()}}"""
+          conn.outputStream.use { it.write(body.toByteArray()) }
+          conn.responseCode
+          conn.disconnect()
+        } catch (_: Exception) {}
+      }.start()
+    } catch (_: Exception) {}
+    // #endregion
+    val snoozeLabel = "Intermitente"
     val timeChip = formatTimeChip(fireTimeSnapshot)
     val dateChip = formatDateChip(dateSnapshot)
 
@@ -824,7 +918,7 @@ class AlarmLockscreenActivity : Activity() {
       setPadding(dp(20), dp(8), dp(20), dp(24))
     }
 
-    val doneBtn = primaryButton("Completar")
+    val doneBtn = primaryButton("Borrar")
     doneBtn.setOnClickListener {
       deliverBridge("OK", reminderId, alarmKind, notificationId, titleSnapshot, startTimeSnapshot, dateSnapshot)
     }
@@ -845,7 +939,7 @@ class AlarmLockscreenActivity : Activity() {
       snoozeBtn,
       LinearLayout.LayoutParams(0, dp(50), 1f).apply { marginEnd = dp(8) },
     )
-    val reproBtn = secondaryButton("Reprogramar")
+    val reproBtn = secondaryButton("Ir a")
     reproBtn.setOnClickListener {
       deliverBridge("REPROGRAMAR", reminderId, alarmKind, notificationId, titleSnapshot, startTimeSnapshot, dateSnapshot)
     }
@@ -1039,7 +1133,11 @@ class AlarmLockscreenActivity : Activity() {
     startTimeSnapshot: String,
     dateSnapshot: String,
   ) {
-    val launch = packageManager.getLaunchIntentForPackage(packageName) ?: return
+    val launch = packageManager.getLaunchIntentForPackage(packageName)
+    if (launch == null) {
+      Log.w("AgendaAlarm", "launchAppWithAction: getLaunchIntentForPackage=null, no se pudo abrir la app")
+      return
+    }
     launch.addFlags(
       Intent.FLAG_ACTIVITY_NEW_TASK or
         Intent.FLAG_ACTIVITY_CLEAR_TOP or
@@ -1052,6 +1150,7 @@ class AlarmLockscreenActivity : Activity() {
     launch.putExtra(AgendaAlarmMainActivityBridge.EXTRA_TITLE_SNAPSHOT, titleSnapshot)
     launch.putExtra(AgendaAlarmMainActivityBridge.EXTRA_START_TIME_SNAPSHOT, startTimeSnapshot)
     launch.putExtra(AgendaAlarmMainActivityBridge.EXTRA_DATE_SNAPSHOT, dateSnapshot)
+    Log.d("AgendaAlarm", "launchAppWithAction extras action=" + action + " reminderId=" + reminderId + " alarmKind=" + alarmKind)
     startActivity(launch)
   }
 
@@ -1071,8 +1170,13 @@ class AlarmLockscreenActivity : Activity() {
     } catch (_: Exception) {
     }
 
-    // Reprogramar: unica accion que abre la app (para elegir nueva hora).
+    // Reprogramar: unica accion que abre la app (para elegir nueva hora). Se encola tambien como
+    // pending_action (igual que Completar/Posponer) por si el emit en vivo se pierde por una carrera
+    // de arranque en frio (JS aun no registro el listener cuando dispatchFromIntent emite); JS la
+    // drena en drainPendingAlarmActions() al iniciar / volver a foreground.
     if (action == "REPROGRAMAR") {
+      Log.d("AgendaAlarm", "deliverBridge REPROGRAMAR reminderId=" + reminderId + " alarmKind=" + alarmKind + " notifId=" + notificationId)
+      enqueuePendingAction(action, reminderId, alarmKind, notificationId, titleSnapshot, startTimeSnapshot, dateSnapshot)
       launchAppWithAction(action, reminderId, alarmKind, notificationId, titleSnapshot, startTimeSnapshot, dateSnapshot)
       finish()
       return
@@ -1116,7 +1220,9 @@ class AlarmLockscreenActivity : Activity() {
       obj.put("dateSnapshot", dateSnapshot)
       arr.put(obj)
       prefs.edit().putString("pending_actions", arr.toString()).apply()
-    } catch (_: Exception) {
+      Log.d("AgendaHeadsUp", "enqueuePendingAction guardado action=" + action + " reminderId=" + reminderId + " total=" + arr.length())
+    } catch (e: Exception) {
+      Log.w("AgendaHeadsUp", "enqueuePendingAction fallo: " + e.message)
     }
   }
 }

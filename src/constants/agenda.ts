@@ -3,37 +3,37 @@
  * Nombres de días y franjas horarias por defecto.
  */
 
-/** Abreviaturas lunes→domingo (4 letras) para selector y calendarios. */
+/** Abreviaturas lunes→domingo (3 letras) para selector y calendarios. */
 export const SINGLE_DAY_LETTERS = [
-  'lune',
-  'mart',
-  'mier',
-  'juev',
-  'vier',
-  'saba',
-  'domi',
+  'lun',
+  'mar',
+  'mié',
+  'jue',
+  'vie',
+  'sáb',
+  'dom',
 ] as const;
 
-/** Nombre del día completo (español), lunes a domingo */
+/** Abreviaturas del día (3 letras), lunes a domingo */
 export const DAY_LETTERS = [
-  'Lunes',
-  'Martes',
-  'Miércoles',
-  'Jueves',
-  'Viernes',
-  'Sábado',
-  'Domingo',
+  'Lun',
+  'Mar',
+  'Mié',
+  'Jue',
+  'Vie',
+  'Sáb',
+  'Dom',
 ] as const;
 
-/** Nombre del día completo, domingo a sábado (cabeceras tipo calendario US) */
+/** Abreviaturas del día (3 letras), domingo a sábado (cabeceras tipo calendario US) */
 export const WEEK_DAY_LETTERS = [
-  'Domingo',
-  'Lunes',
-  'Martes',
-  'Miércoles',
-  'Jueves',
-  'Viernes',
-  'Sábado',
+  'Dom',
+  'Lun',
+  'Mar',
+  'Mié',
+  'Jue',
+  'Vie',
+  'Sáb',
 ] as const;
 
 /** Horas mostradas en la vista semanal (6:00 a.m. – 10:00 p.m., etiquetas 12h) */

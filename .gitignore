@@ -41,5 +41,3 @@ credentials/android/.key-pass.tmp
 *.tsbuildinfo
 
 # generated native folders
-/ios
-/android

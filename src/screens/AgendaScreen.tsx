@@ -244,12 +244,17 @@ export function AgendaScreen() {
 
   /** "Reprogramar" desde el aviso: abrir el modal de detalles de ese recordatorio (selector de fecha/hora). */
   const openReminderForReschedule = useCallback(async (reminderId: string) => {
+    console.log('[AgendaAlarmBridge] openReminderForReschedule reminderId=' + reminderId);
     const r = await getReminderById(reminderId);
-    if (!r) return;
+    if (!r) {
+      console.warn('[AgendaAlarmBridge] openReminderForReschedule: getReminderById devolvio null para reminderId=' + reminderId);
+      return;
+    }
+    console.log('[AgendaAlarmBridge] openReminderForReschedule: recordatorio encontrado, abriendo modal', r.id, r.date);
     setActiveTab('day');
     setSelectedDate(r.date);
     setSelectedReminder(r);
-    setDetailsInitialTarget('time');
+    setDetailsInitialTarget(null);
     setDetailsDefaultStartTime(undefined);
     setDetailsDefaultTitle('');
     setDetailsVisible(true);
@@ -258,10 +263,12 @@ export function AgendaScreen() {
   useEffect(() => {
     // Arranque en frío: el aviso pudo emitir "Reprogramar" antes de montar el listener.
     const pending = consumePendingRescheduleReminderId();
+    console.log('[AgendaAlarmBridge] AgendaScreen mount: consumePendingRescheduleReminderId=' + (pending ?? 'null') + ', suscribiendo REMINDER_RESCHEDULE_FROM_NOTIFICATION');
     if (pending) void openReminderForReschedule(pending);
     const sub = DeviceEventEmitter.addListener(
       REMINDER_RESCHEDULE_FROM_NOTIFICATION,
       (payload: { reminderId: string }) => {
+        console.log('[AgendaAlarmBridge] AgendaScreen: REMINDER_RESCHEDULE_FROM_NOTIFICATION recibido', payload);
         void openReminderForReschedule(payload.reminderId);
       }
     );
@@ -643,7 +650,8 @@ export function AgendaScreen() {
   const { labels: scheduleHours, minuteValues: scheduleHourMinutes } = buildHoursLabelsWithOptional30(
     daySchedule?.startHour ?? preferences.scheduleStartHour,
     daySchedule?.endHour ?? preferences.scheduleEndHour,
-    timedReminders
+    timedReminders,
+    preferences.useMilitaryTime
   );
 
   if (optionsVisible) {

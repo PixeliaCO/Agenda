@@ -33,9 +33,9 @@ export function AgendaFooter({
   onIrA,
   onHoy,
 }: AgendaFooterProps) {
-  const { colors, fontScale } = usePreferences();
-  const fs = (n: number) => scaledFontSize(n, fontScale);
-  const pad = 8 + Math.round((fontScale - 1) * 6);
+  const { colors } = usePreferences();
+  // Tamaño fijo (equivalente a “Normal”): no escala con Pequeño/Grande.
+  const footerLabelSize = scaledFontSize(12, 1);
   const styles = useMemo(
     () =>
       StyleSheet.create({
@@ -44,7 +44,7 @@ export function AgendaFooter({
           alignItems: 'center',
           justifyContent: 'space-between',
           flexWrap: 'nowrap',
-          paddingVertical: pad,
+          paddingVertical: 8,
           paddingHorizontal: 6,
           gap: 4,
           // Mismo fondo claro que la pantalla; separa solo la línea azul (como la foto).
@@ -88,13 +88,13 @@ export function AgendaFooter({
           flexShrink: 1,
         },
         footerTextBtnLabel: {
-          fontSize: fs(12),
+          fontSize: footerLabelSize,
           fontFamily: 'PixelOperator',
           fontWeight: 'normal',
           color: colors.footerText,
         },
       }),
-    [colors, fontScale, pad]
+    [colors, footerLabelSize]
   );
 
   /** Color del glifo según estado (blanco sobre azul activo). */

@@ -29,8 +29,8 @@ import { usePreferences } from '../../contexts/PreferencesContext';
 import {
   time24To12,
   time12To24,
-  formatTime12h,
-  formatTime12hCompact,
+  formatTimeDisplay,
+  formatTimeCompact,
   formatDatePalm,
   getDayIndexFromDate,
 } from '../../utils/date';
@@ -323,7 +323,8 @@ export function EventDetailsModal({
   const [detailsPalmPickerVisible, setDetailsPalmPickerVisible] = useState(false);
   const [datePickerVisible, setDatePickerVisible] = useState(false);
 
-  const { colors, fontScale } = usePreferences();
+  const { colors, fontScale, preferences } = usePreferences();
+  const use24h = preferences.useMilitaryTime;
   const fs = (n: number) => scaledFontSize(n, fontScale);
   const { height: windowHeight } = useWindowDimensions();
 
@@ -1477,8 +1478,8 @@ export function EventDetailsModal({
     if (!dateISO) return '';
     const { startHour: sh, endHour: eh } = getDayVisibleRange(dateISO);
     const { startTime: st, endTime: et } = dayVisibleRangeToTimes(sh, eh);
-    return `De ${formatTime12h(st)} a ${formatTime12h(et)} (horario del día en la agenda)`;
-  }, [dateISO, getDayVisibleRange]);
+    return `De ${formatTimeDisplay(st, use24h)} a ${formatTimeDisplay(et, use24h)} (horario del día en la agenda)`;
+  }, [dateISO, getDayVisibleRange, use24h]);
 
   const editTimeSummary = useMemo(() => {
     if (noTime) return 'Sin hora';
@@ -1490,8 +1491,8 @@ export function EventDetailsModal({
     if (sh === null || sm === null || eh === null || em === null) return '—';
     const st = time12To24(sh, sm, startPm);
     const et = time12To24(eh, em, endPm);
-    return `${formatTime12hCompact(st)} - ${formatTime12hCompact(et)}`;
-  }, [noTime, allDay, startHour, startMin, startPm, endHour, endMin, endPm]);
+    return `${formatTimeCompact(st, use24h)} - ${formatTimeCompact(et, use24h)}`;
+  }, [noTime, allDay, startHour, startMin, startPm, endHour, endMin, endPm, use24h]);
 
   const handleDeletePress = () => {
     if (!reminder?.id || !onDelete) return;

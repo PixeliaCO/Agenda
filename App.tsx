@@ -5,12 +5,13 @@
  */
 
 import React, { useEffect } from 'react';
-import { StyleSheet, Text, TextInput } from 'react-native';
+import { AppState, Platform, StyleSheet, Text, TextInput } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { useFonts } from 'expo-font';
 import { PreferencesProvider } from './src/contexts/PreferencesContext';
 import { AgendaScreen } from './src/screens';
+import { syncCalendarIcon } from './src/services/calendarIconService';
 
 let didApplyGlobalFont = false;
 let originalTextRender: any = null;
@@ -26,6 +27,15 @@ export default function App() {
       console.warn('[Agenda] No se pudieron cargar las fuentes PixelOperator:', fontError);
     }
   }, [fontError]);
+
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    syncCalendarIcon();
+    const sub = AppState.addEventListener('change', (next) => {
+      if (next === 'active') syncCalendarIcon();
+    });
+    return () => sub.remove();
+  }, []);
 
   useEffect(() => {
     if (!fontsLoaded) return;
@@ -67,11 +77,8 @@ export default function App() {
     (TextInput.defaultProps as any).maxFontSizeMultiplier = 1;
   }, [fontsLoaded]);
 
-  // No bloquear la UI si las fuentes fallan (evita pantalla blanca permanente).
-  if (!fontsLoaded && !fontError) {
-    return <GestureHandlerRootView style={{ flex: 1, backgroundColor: '#ffffff' }} />;
-  }
-
+  // Nunca bloquear el primer frame: si useFonts se queda colgado, la UI
+  // quedaba en blanco permanente. Las fuentes se aplican cuando lleguen.
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>

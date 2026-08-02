@@ -1,6 +1,6 @@
 /**
  * Cabecera de la pantalla de agenda (estilo Palm Datebook).
- * Fila 1: fecha completa en barra azul. Fila 2: ◀ días completos ▶.
+ * Fila 1: fecha completa en barra azul. Fila 2: ◀ abreviaturas de días (3 letras) ▶.
  */
 
 import React, { useMemo } from 'react';

@@ -804,8 +804,7 @@ export function AgendaSchedule({
           paddingHorizontal: 4,
           paddingVertical: 2,
           fontSize: fs(14),
-          fontFamily: 'PixelOperator',
-          fontWeight: 'normal',
+          ...titleFont,
           color: colors.text,
           // Sin caja: el campo se integra en la fila (el fondo grande quedaba feo al seleccionar la hora).
           backgroundColor: 'transparent',

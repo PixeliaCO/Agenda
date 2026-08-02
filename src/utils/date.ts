@@ -155,6 +155,11 @@ export function formatTimeDisplay(time24: string, use24h: boolean): string {
   return use24h ? formatTime24h(time24) : formatTime12h(time24);
 }
 
+/** Formato compacto según tipo: 12h "4:00pm" o 24h "16:00" */
+export function formatTimeCompact(time24: string, use24h: boolean): string {
+  return use24h ? formatTime24h(time24) : formatTime12hCompact(time24);
+}
+
 const WEEKDAY_SHORT = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
 
 /** Fecha compacta estilo Palm: "Jue 8/1/26" */

@@ -1,54 +1,55 @@
-import { slotLabelTo24H } from '../constants/agenda';
-
 /** Minutos desde medianoche para ordenar etiquetas */
 function timeToMinutes(time: string): number {
   const [h, m] = time.split(':').map(Number);
   return h * 60 + (m || 0);
 }
 
-function hour24ToLabel(hour24: number, minute = 0): string {
+function hour24ToLabel(hour24: number, minute = 0, use24h = false): string {
+  const minStr = minute === 0 ? '00' : String(minute).padStart(2, '0');
+  if (use24h) {
+    return `${String(hour24).padStart(2, '0')}:${minStr}`;
+  }
   const h = hour24 === 0 ? 12 : hour24 > 12 ? hour24 - 12 : hour24;
-  const m = minute === 0 ? '00' : String(minute).padStart(2, '0');
-  return `${h}:${m}`;
+  return `${h}:${minStr}`;
 }
 
 /**
- * Devuelve un array de etiquetas de hora en formato 12h desde startHour hasta endHour (incluidos), en 24h.
- * Ej: buildHoursLabels(10, 20) => ['10:00','11:00','12:00','1:00',...,'8:00']
+ * Devuelve un array de etiquetas de hora desde startHour hasta endHour (incluidos), en 24h.
+ * Ej 12h: buildHoursLabels(10, 20) => ['10:00','11:00','12:00','1:00',...,'8:00']
+ * Ej 24h: ['10:00',…,'20:00']
  * Si start > end devuelve al menos la hora de inicio.
  */
-export function buildHoursLabels(startHour24: number, endHour24: number): string[] {
+export function buildHoursLabels(
+  startHour24: number,
+  endHour24: number,
+  use24h = false
+): string[] {
   const labels: string[] = [];
   const start = Math.max(0, Math.min(23, startHour24));
   const end = Math.max(0, Math.min(23, endHour24));
   const lo = Math.min(start, end);
   const hi = Math.max(start, end);
   for (let h = lo; h <= hi; h++) {
-    labels.push(hour24ToLabel(h));
+    labels.push(hour24ToLabel(h, 0, use24h));
   }
-  return labels.length > 0 ? labels : [hour24ToLabel(8)];
-}
-
-/** Convierte hora 24h + minuto a etiqueta 12h (ej. 18, 30 -> "6:30") */
-function hour24ToLabelWithMinute(hour24: number, minute: number): string {
-  return hour24ToLabel(hour24, minute);
+  return labels.length > 0 ? labels : [hour24ToLabel(8, 0, use24h)];
 }
 
 /**
  * Misma convención de texto que las filas del día (`buildHoursLabelsWithOptional30`).
  * Útil para pintar inicio/fin en la franja alineado con las horas creadas.
  */
-export function minutesToScheduleLabel(totalMin: number): string {
+export function minutesToScheduleLabel(totalMin: number, use24h = false): string {
   const t = ((totalMin % (24 * 60)) + 24 * 60) % (24 * 60);
   const hour24 = Math.floor(t / 60) % 24;
   const minute = t % 60;
-  return hour24ToLabelWithMinute(hour24, minute);
+  return hour24ToLabel(hour24, minute, use24h);
 }
 
 /** "HH:mm" 24h → etiqueta como en la cuadrícula (misma que `minutesToScheduleLabel`). */
-export function time24ToScheduleLabel(time24: string): string {
+export function time24ToScheduleLabel(time24: string, use24h = false): string {
   const [h, m] = time24.split(':').map(Number);
-  return minutesToScheduleLabel((h || 0) * 60 + (m || 0));
+  return minutesToScheduleLabel((h || 0) * 60 + (m || 0), use24h);
 }
 
 /**
@@ -66,7 +67,7 @@ export function reminderEndMinutesForLayout(startTime: string, endTime?: string 
 }
 
 /**
- * Resultado: etiquetas 12h en orden y minutos desde medianoche (24h) para cada fila.
+ * Resultado: etiquetas en orden y minutos desde medianoche (24h) para cada fila.
  * Así la vista no interpreta "6:00" como 6 PM cuando el intervalo es 6–11 AM.
  */
 export type ScheduleHoursResult = { labels: string[]; minuteValues: number[] };
@@ -79,11 +80,12 @@ export type ScheduleHoursResult = { labels: string[]; minuteValues: number[] };
 export function buildHoursLabelsWithOptional30(
   startHour24: number,
   endHour24: number,
-  reminderTimes: { startTime: string; endTime?: string | null }[]
+  reminderTimes: { startTime: string; endTime?: string | null }[],
+  use24h = false
 ): ScheduleHoursResult {
-  const base = buildHoursLabels(startHour24, endHour24);
+  const base = buildHoursLabels(startHour24, endHour24, use24h);
   if (base.length === 0) {
-    const def = hour24ToLabel(8);
+    const def = hour24ToLabel(8, 0, use24h);
     return { labels: [def], minuteValues: [8 * 60] };
   }
   const lo = Math.min(startHour24, endHour24);
@@ -135,7 +137,7 @@ export function buildHoursLabelsWithOptional30(
     labels: sorted.map((min) => {
       const hour24 = Math.floor(min / 60) % 24;
       const minute = min % 60;
-      return hour24ToLabelWithMinute(hour24, minute);
+      return hour24ToLabel(hour24, minute, use24h);
     }),
     minuteValues: sorted,
   };

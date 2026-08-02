@@ -5,7 +5,7 @@
 import React, { useMemo } from 'react';
 import { View, Text, StyleSheet, Pressable, ScrollView } from 'react-native';
 import { usePreferences } from '../../contexts/PreferencesContext';
-import { formatTime12hShort } from '../../utils/date';
+import { formatTimeShort } from '../../utils/date';
 import { scaledFontSize, titleFont } from '../../utils/typography';
 import type { Reminder } from '../../types/reminder';
 import { EventTitleWithIcons } from '../EventTitleWithIcons';
@@ -21,7 +21,8 @@ export type DaySummaryViewProps = {
 };
 
 export function DaySummaryView({ reminders, onReminderPress }: DaySummaryViewProps) {
-  const { colors, fontScale } = usePreferences();
+  const { colors, fontScale, preferences } = usePreferences();
+  const use24h = preferences.useMilitaryTime;
 
   const sorted = useMemo(
     () =>
@@ -89,8 +90,8 @@ export function DaySummaryView({ reminders, onReminderPress }: DaySummaryViewPro
                 {r.noTime
                   ? '—'
                   : r.allDay && r.endTime && r.startTime !== r.endTime
-                    ? `${formatTime12hShort(r.startTime)}–${formatTime12hShort(r.endTime)}`
-                    : formatTime12hShort(r.startTime)}
+                    ? `${formatTimeShort(r.startTime, use24h)}–${formatTimeShort(r.endTime, use24h)}`
+                    : formatTimeShort(r.startTime, use24h)}
               </Text>
               <View style={styles.titleWrap}>
                 <EventTitleWithIcons

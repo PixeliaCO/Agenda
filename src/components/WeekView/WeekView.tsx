@@ -21,8 +21,8 @@ import {
   formatDisplayDate,
   getWeekDates,
   getDayOfMonth,
-  formatTime12h,
-  formatTime12hShort,
+  formatTimeDisplay,
+  formatTimeShort,
 } from '../../utils/date';
 import type { Reminder } from '../../types/reminder';
 import { reminderEndMinutesForLayout } from '../../utils/scheduleHours';
@@ -34,8 +34,8 @@ const TIME_COLUMN_WIDTH = 46;
 const NUM_COLS = 7;
 /** Altura mínima de cada fila horaria (px); evita celdas demasiado bajas en pantallas anchas. */
 const WEEK_MIN_ROW_HEIGHT = 40;
-/** Ancho mínimo de cada columna/día (px). Debe caber “Miércoles” en cabecera. */
-const WEEK_MIN_DAY_COL_WIDTH = 92;
+/** Ancho mínimo de cada columna/día (px). Debe caber “Mié” en cabecera. */
+const WEEK_MIN_DAY_COL_WIDTH = 48;
 /** Ancho mínimo de carril cuando hay solapes. */
 const LANE_MIN_WIDTH = 30;
 const LANE_GAP = 2;
@@ -47,15 +47,16 @@ const CELL_STACK_PADDING_V = 2;
 const CELL_STACK_GAP = 2;
 const CELL_EVENT_HIT_SLOP = 10;
 
-type WeekGridRow = { slot24: string; display12h: string };
-type WeekVisualRow = { slot24: string; display12h: string; hour: number; slotIndex: number };
+type WeekGridRow = { slot24: string; displayLabel: string };
+type WeekVisualRow = { slot24: string; displayLabel: string; hour: number; slotIndex: number };
 
-/** Rango de filas horarias: preferencias + eventos de la semana. Etiqueta en 12h; slot24 para toques y layout. */
+/** Rango de filas horarias: preferencias + eventos de la semana. Etiqueta según 12h/24h; slot24 para toques y layout. */
 function buildWeekHourRange(
   reminders: Reminder[],
   weekDates: string[],
   scheduleStartHour: number,
-  scheduleEndHour: number
+  scheduleEndHour: number,
+  use24h: boolean
 ): { gridRows: WeekGridRow[]; gridStartHour: number } {
   const inWeek = new Set(weekDates);
   let minMin: number | null = null;
@@ -77,7 +78,7 @@ function buildWeekHourRange(
   const gridRows: WeekGridRow[] = [];
   for (let h = startHour; h <= endHour; h++) {
     const slot24 = `${String(h).padStart(2, '0')}:00`;
-    gridRows.push({ slot24, display12h: formatTime12hShort(slot24) });
+    gridRows.push({ slot24, displayLabel: formatTimeShort(slot24, use24h) });
   }
   return { gridRows, gridStartHour: startHour };
 }
@@ -200,7 +201,7 @@ function expandVisualRows(baseGridRows: WeekGridRow[], slotsPerHour: number[]): 
     for (let s = 0; s < slots; s++) {
       out.push({
         slot24: row.slot24,
-        display12h: s === 0 ? row.display12h : '',
+        displayLabel: s === 0 ? row.displayLabel : '',
         hour,
         slotIndex: s,
       });
@@ -290,8 +291,20 @@ export function WeekView({
   const timedForWeek = useMemo(() => reminders.filter((r) => !r.noTime), [reminders]);
   const { gridRows: baseGridRows, gridStartHour } = useMemo(
     () =>
-      buildWeekHourRange(timedForWeek, weekDates, preferences.scheduleStartHour, preferences.scheduleEndHour),
-    [timedForWeek, weekDates, preferences.scheduleStartHour, preferences.scheduleEndHour]
+      buildWeekHourRange(
+        timedForWeek,
+        weekDates,
+        preferences.scheduleStartHour,
+        preferences.scheduleEndHour,
+        preferences.useMilitaryTime
+      ),
+    [
+      timedForWeek,
+      weekDates,
+      preferences.scheduleStartHour,
+      preferences.scheduleEndHour,
+      preferences.useMilitaryTime,
+    ]
   );
   const slotsPerHour = useMemo(
     () => computeSlotsPerHour(weekDates, reminders, gridStartHour, baseGridRows),
@@ -525,7 +538,7 @@ export function WeekView({
         >
           <Animated.View style={[styles.timeCell, { transform: [{ translateX: hScrollX }] }]}>
             <Text style={styles.timeLabel} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>
-              {row.display12h}
+              {row.displayLabel}
             </Text>
           </Animated.View>
           <View style={[styles.gridCells, { width: NUM_COLS * dayColW }]}>
@@ -702,9 +715,9 @@ export function WeekView({
                 {formatDisplayDate(tooltipReminder.date)}
                 {tooltipReminder.noTime
                   ? ' · Sin hora'
-                  : ` · ${tooltipReminder.allDay ? 'Todo el día · ' : ''}${formatTime12h(tooltipReminder.startTime)}${
+                  : ` · ${tooltipReminder.allDay ? 'Todo el día · ' : ''}${formatTimeDisplay(tooltipReminder.startTime, preferences.useMilitaryTime)}${
                       tooltipReminder.endTime && tooltipReminder.startTime !== tooltipReminder.endTime
-                        ? ` - ${formatTime12h(tooltipReminder.endTime)}`
+                        ? ` - ${formatTimeDisplay(tooltipReminder.endTime, preferences.useMilitaryTime)}`
                         : ''
                     }`}
               </Text>

@@ -60,7 +60,16 @@ function hour12To24h(hour: number, pm: boolean): number {
 }
 
 export function OptionsScreen({ onClose, selectedDate, onDayScheduleSaved }: OptionsScreenProps) {
-  const { preferences, setFontSize, setDarkMode, setAlarmBehavior, fontScale, colors } = usePreferences();
+  const {
+    preferences,
+    setFontSize,
+    setDarkMode,
+    setUseMilitaryTime,
+    setAlarmBehavior,
+    fontScale,
+    colors,
+  } = usePreferences();
+  const use24h = preferences.useMilitaryTime;
   const [dayStartHour, setDayStartHour] = useState('8');
   const [dayStartPm, setDayStartPm] = useState(false);
   const [dayEndHour, setDayEndHour] = useState('6');
@@ -88,14 +97,19 @@ export function OptionsScreen({ onClose, selectedDate, onDayScheduleSaved }: Opt
       const day = getDaySchedule(selectedDate);
       const start24 = day?.startHour ?? preferences.scheduleStartHour;
       const end24 = day?.endHour ?? preferences.scheduleEndHour;
-      const start12 = hour24To12h(start24);
-      const end12 = hour24To12h(end24);
-      setDayStartHour(String(start12.hour));
-      setDayStartPm(start12.pm);
-      setDayEndHour(String(end12.hour));
-      setDayEndPm(end12.pm);
+      if (use24h) {
+        setDayStartHour(String(start24));
+        setDayEndHour(String(end24));
+      } else {
+        const start12 = hour24To12h(start24);
+        const end12 = hour24To12h(end24);
+        setDayStartHour(String(start12.hour));
+        setDayStartPm(start12.pm);
+        setDayEndHour(String(end12.hour));
+        setDayEndPm(end12.pm);
+      }
     }
-  }, [selectedDate, preferences.scheduleStartHour, preferences.scheduleEndHour]);
+  }, [selectedDate, preferences.scheduleStartHour, preferences.scheduleEndHour, use24h]);
 
   useEffect(() => {
     setAlarmSnoozeStr(String(preferences.alarmSnoozeMinutes));
@@ -152,8 +166,8 @@ export function OptionsScreen({ onClose, selectedDate, onDayScheduleSaved }: Opt
     const sh = parseInt(dayStartHour, 10);
     const eh = parseInt(dayEndHour, 10);
     if (Number.isNaN(sh) || Number.isNaN(eh)) return;
-    const start24 = hour12To24h(sh, dayStartPm);
-    const end24 = hour12To24h(eh, dayEndPm);
+    const start24 = use24h ? Math.max(0, Math.min(23, sh)) : hour12To24h(sh, dayStartPm);
+    const end24 = use24h ? Math.max(0, Math.min(23, eh)) : hour12To24h(eh, dayEndPm);
     setDaySchedule(selectedDate, start24, end24);
     onDayScheduleSaved?.();
   };
@@ -161,12 +175,17 @@ export function OptionsScreen({ onClose, selectedDate, onDayScheduleSaved }: Opt
   const handleUseDefaultSchedule = () => {
     if (!selectedDate) return;
     clearDaySchedule(selectedDate);
-    const start12 = hour24To12h(preferences.scheduleStartHour);
-    const end12 = hour24To12h(preferences.scheduleEndHour);
-    setDayStartHour(String(start12.hour));
-    setDayStartPm(start12.pm);
-    setDayEndHour(String(end12.hour));
-    setDayEndPm(end12.pm);
+    if (use24h) {
+      setDayStartHour(String(preferences.scheduleStartHour));
+      setDayEndHour(String(preferences.scheduleEndHour));
+    } else {
+      const start12 = hour24To12h(preferences.scheduleStartHour);
+      const end12 = hour24To12h(preferences.scheduleEndHour);
+      setDayStartHour(String(start12.hour));
+      setDayStartPm(start12.pm);
+      setDayEndHour(String(end12.hour));
+      setDayEndPm(end12.pm);
+    }
     onDayScheduleSaved?.();
   };
 
@@ -453,6 +472,48 @@ export function OptionsScreen({ onClose, selectedDate, onDayScheduleSaved }: Opt
         </View>
       </View>
 
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Hora militar</Text>
+        <View style={styles.optionGrid}>
+          <View style={styles.optionRow}>
+            <TouchableOpacity
+              style={[
+                styles.optionCell,
+                preferences.useMilitaryTime && styles.optionCellSelected,
+              ]}
+              onPress={() => setUseMilitaryTime(true)}
+            >
+              <Text
+                style={[
+                  styles.optionCellText,
+                  preferences.useMilitaryTime && styles.optionCellTextSelected,
+                ]}
+              >
+                Activada
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[
+                styles.optionCell,
+                styles.optionCellLast,
+                styles.optionCellLastRow,
+                !preferences.useMilitaryTime && styles.optionCellSelected,
+              ]}
+              onPress={() => setUseMilitaryTime(false)}
+            >
+              <Text
+                style={[
+                  styles.optionCellText,
+                  !preferences.useMilitaryTime && styles.optionCellTextSelected,
+                ]}
+              >
+                Desactivada
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+
       {Platform.OS === 'android' && (
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Alarmas</Text>
@@ -631,21 +692,26 @@ export function OptionsScreen({ onClose, selectedDate, onDayScheduleSaved }: Opt
                 value={dayStartHour}
                 onChangeText={(t) => setDayStartHour(onlyDigits(t).slice(0, 2))}
                 keyboardType="number-pad"
-                placeholder="8"
+                placeholder={use24h ? '6' : '8'}
                 placeholderTextColor={colors.textSecondary}
               />
-              <TouchableOpacity
-                style={[styles.ampmBtn, !dayStartPm && styles.ampmBtnActive]}
-                onPress={() => setDayStartPm(false)}
-              >
-                <Text style={[styles.ampmBtnText, !dayStartPm && styles.ampmBtnTextActive]}>a. m.</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.ampmBtn, dayStartPm && styles.ampmBtnActive]}
-                onPress={() => setDayStartPm(true)}
-              >
-                <Text style={[styles.ampmBtnText, dayStartPm && styles.ampmBtnTextActive]}>p. m.</Text>
-              </TouchableOpacity>
+              {!use24h && (
+                <>
+                  <TouchableOpacity
+                    style={[styles.ampmBtn, !dayStartPm && styles.ampmBtnActive]}
+                    onPress={() => setDayStartPm(false)}
+                  >
+                    <Text style={[styles.ampmBtnText, !dayStartPm && styles.ampmBtnTextActive]}>a. m.</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.ampmBtn, dayStartPm && styles.ampmBtnActive]}
+                    onPress={() => setDayStartPm(true)}
+                  >
+                    <Text style={[styles.ampmBtnText, dayStartPm && styles.ampmBtnTextActive]}>p. m.</Text>
+                  </TouchableOpacity>
+                </>
+              )}
+              {use24h && <Text style={styles.rowLabel}>h</Text>}
             </View>
             <View style={styles.dayScheduleRow}>
               <Text style={styles.rowLabel}>Fin</Text>
@@ -654,21 +720,26 @@ export function OptionsScreen({ onClose, selectedDate, onDayScheduleSaved }: Opt
                 value={dayEndHour}
                 onChangeText={(t) => setDayEndHour(onlyDigits(t).slice(0, 2))}
                 keyboardType="number-pad"
-                placeholder="6"
+                placeholder={use24h ? '22' : '6'}
                 placeholderTextColor={colors.textSecondary}
               />
-              <TouchableOpacity
-                style={[styles.ampmBtn, !dayEndPm && styles.ampmBtnActive]}
-                onPress={() => setDayEndPm(false)}
-              >
-                <Text style={[styles.ampmBtnText, !dayEndPm && styles.ampmBtnTextActive]}>a. m.</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.ampmBtn, dayEndPm && styles.ampmBtnActive]}
-                onPress={() => setDayEndPm(true)}
-              >
-                <Text style={[styles.ampmBtnText, dayEndPm && styles.ampmBtnTextActive]}>p. m.</Text>
-              </TouchableOpacity>
+              {!use24h && (
+                <>
+                  <TouchableOpacity
+                    style={[styles.ampmBtn, !dayEndPm && styles.ampmBtnActive]}
+                    onPress={() => setDayEndPm(false)}
+                  >
+                    <Text style={[styles.ampmBtnText, !dayEndPm && styles.ampmBtnTextActive]}>a. m.</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.ampmBtn, dayEndPm && styles.ampmBtnActive]}
+                    onPress={() => setDayEndPm(true)}
+                  >
+                    <Text style={[styles.ampmBtnText, dayEndPm && styles.ampmBtnTextActive]}>p. m.</Text>
+                  </TouchableOpacity>
+                </>
+              )}
+              {use24h && <Text style={styles.rowLabel}>h</Text>}
             </View>
             <View style={styles.actionRow}>
               <TouchableOpacity style={styles.actionBtn} onPress={handleSaveDaySchedule}>

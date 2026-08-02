@@ -1,0 +1,1353 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">
+  <uses-permission android:name="android.permission.INTERNET"/>
+  <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+  <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
+  <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
+  <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>
+  <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
+  <uses-permission android:name="android.permission.USE_EXACT_ALARM"/>
+  <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" tools:node="remove"/>
+  <uses-permission android:name="android.permission.VIBRATE"/>
+  <uses-permission android:name="android.permission.WAKE_LOCK"/>
+  <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>
+  <queries>
+    <intent>
+      <action android:name="android.intent.action.VIEW"/>
+      <category android:name="android.intent.category.BROWSABLE"/>
+      <data android:scheme="https"/>
+    </intent>
+  </queries>
+  <application android:name=".MainApplication" android:label="@string/app_name" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher_round" android:allowBackup="true" android:theme="@style/AppTheme" android:supportsRtl="true" android:enableOnBackInvokedCallback="false">
+    <meta-data android:name="expo.modules.updates.ENABLED" android:value="true"/>
+    <meta-data android:name="expo.modules.updates.EXPO_RUNTIME_VERSION" android:value="@string/expo_runtime_version"/>
+    <meta-data android:name="expo.modules.updates.EXPO_UPDATES_CHECK_ON_LAUNCH" android:value="ALWAYS"/>
+    <meta-data android:name="expo.modules.updates.EXPO_UPDATES_LAUNCH_WAIT_MS" android:value="0"/>
+    <meta-data android:name="expo.modules.updates.EXPO_UPDATE_URL" android:value="https://u.expo.dev/7a96110d-95a9-42fd-b532-f304c3cb8552"/>
+    <activity android:name=".MainActivity" android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|uiMode" android:launchMode="singleTask" android:windowSoftInputMode="adjustResize" android:theme="@style/Theme.App.SplashScreen" android:exported="true" android:screenOrientation="portrait" android:showWhenLocked="true" android:turnScreenOn="true">
+      <intent-filter>
+        <action android:name="android.intent.action.VIEW"/>
+        <category android:name="android.intent.category.DEFAULT"/>
+        <category android:name="android.intent.category.BROWSABLE"/>
+        <data android:scheme="agendapalm"/>
+      </intent-filter>
+    </activity>
+    <activity android:name=".AlarmLockscreenActivity" android:exported="false" android:theme="@android:style/Theme.Material.Light.NoActionBar.Fullscreen" android:showWhenLocked="true" android:turnScreenOn="true" android:excludeFromRecents="true" android:launchMode="singleInstance" android:taskAffinity=""/>
+    <receiver android:name=".AgendaAlarmBannerReceiver" android:exported="false">
+      <intent-filter>
+        <action android:name="com.warrioxproductionss.agendapalm.ALARM_BANNER_ACTION"/>
+      </intent-filter>
+    </receiver>
+    <receiver android:name=".CalendarIconReceiver" android:exported="true" android:enabled="true">
+      <intent-filter>
+        <action android:name="android.intent.action.BOOT_COMPLETED"/>
+        <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED"/>
+        <action android:name="android.intent.action.DATE_CHANGED"/>
+        <action android:name="android.intent.action.TIMEZONE_CHANGED"/>
+        <action android:name="android.intent.action.TIME_SET"/>
+        <action android:name="com.warrioxproductionss.agendapalm.UPDATE_CALENDAR_ICON"/>
+      </intent-filter>
+    </receiver>
+    <activity-alias android:name=".CalendarIcon_d1_w0" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d1_w0" android:roundIcon="@mipmap/ic_cal_d1_w0" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d2_w0" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d2_w0" android:roundIcon="@mipmap/ic_cal_d2_w0" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d3_w0" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d3_w0" android:roundIcon="@mipmap/ic_cal_d3_w0" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d4_w0" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d4_w0" android:roundIcon="@mipmap/ic_cal_d4_w0" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d5_w0" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d5_w0" android:roundIcon="@mipmap/ic_cal_d5_w0" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d6_w0" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d6_w0" android:roundIcon="@mipmap/ic_cal_d6_w0" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d7_w0" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d7_w0" android:roundIcon="@mipmap/ic_cal_d7_w0" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d8_w0" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d8_w0" android:roundIcon="@mipmap/ic_cal_d8_w0" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d9_w0" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d9_w0" android:roundIcon="@mipmap/ic_cal_d9_w0" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d10_w0" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d10_w0" android:roundIcon="@mipmap/ic_cal_d10_w0" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d11_w0" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d11_w0" android:roundIcon="@mipmap/ic_cal_d11_w0" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d12_w0" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d12_w0" android:roundIcon="@mipmap/ic_cal_d12_w0" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d13_w0" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d13_w0" android:roundIcon="@mipmap/ic_cal_d13_w0" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d14_w0" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d14_w0" android:roundIcon="@mipmap/ic_cal_d14_w0" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d15_w0" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d15_w0" android:roundIcon="@mipmap/ic_cal_d15_w0" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d16_w0" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d16_w0" android:roundIcon="@mipmap/ic_cal_d16_w0" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d17_w0" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d17_w0" android:roundIcon="@mipmap/ic_cal_d17_w0" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d18_w0" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d18_w0" android:roundIcon="@mipmap/ic_cal_d18_w0" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d19_w0" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d19_w0" android:roundIcon="@mipmap/ic_cal_d19_w0" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d20_w0" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d20_w0" android:roundIcon="@mipmap/ic_cal_d20_w0" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d21_w0" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d21_w0" android:roundIcon="@mipmap/ic_cal_d21_w0" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d22_w0" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d22_w0" android:roundIcon="@mipmap/ic_cal_d22_w0" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d23_w0" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d23_w0" android:roundIcon="@mipmap/ic_cal_d23_w0" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d24_w0" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d24_w0" android:roundIcon="@mipmap/ic_cal_d24_w0" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d25_w0" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d25_w0" android:roundIcon="@mipmap/ic_cal_d25_w0" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d26_w0" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d26_w0" android:roundIcon="@mipmap/ic_cal_d26_w0" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d27_w0" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d27_w0" android:roundIcon="@mipmap/ic_cal_d27_w0" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d28_w0" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d28_w0" android:roundIcon="@mipmap/ic_cal_d28_w0" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d29_w0" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d29_w0" android:roundIcon="@mipmap/ic_cal_d29_w0" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d30_w0" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d30_w0" android:roundIcon="@mipmap/ic_cal_d30_w0" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d31_w0" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d31_w0" android:roundIcon="@mipmap/ic_cal_d31_w0" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d1_w1" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d1_w1" android:roundIcon="@mipmap/ic_cal_d1_w1" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d2_w1" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d2_w1" android:roundIcon="@mipmap/ic_cal_d2_w1" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d3_w1" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d3_w1" android:roundIcon="@mipmap/ic_cal_d3_w1" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d4_w1" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d4_w1" android:roundIcon="@mipmap/ic_cal_d4_w1" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d5_w1" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d5_w1" android:roundIcon="@mipmap/ic_cal_d5_w1" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d6_w1" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d6_w1" android:roundIcon="@mipmap/ic_cal_d6_w1" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d7_w1" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d7_w1" android:roundIcon="@mipmap/ic_cal_d7_w1" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d8_w1" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d8_w1" android:roundIcon="@mipmap/ic_cal_d8_w1" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d9_w1" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d9_w1" android:roundIcon="@mipmap/ic_cal_d9_w1" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d10_w1" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d10_w1" android:roundIcon="@mipmap/ic_cal_d10_w1" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d11_w1" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d11_w1" android:roundIcon="@mipmap/ic_cal_d11_w1" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d12_w1" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d12_w1" android:roundIcon="@mipmap/ic_cal_d12_w1" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d13_w1" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d13_w1" android:roundIcon="@mipmap/ic_cal_d13_w1" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d14_w1" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d14_w1" android:roundIcon="@mipmap/ic_cal_d14_w1" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d15_w1" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d15_w1" android:roundIcon="@mipmap/ic_cal_d15_w1" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d16_w1" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d16_w1" android:roundIcon="@mipmap/ic_cal_d16_w1" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d17_w1" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d17_w1" android:roundIcon="@mipmap/ic_cal_d17_w1" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d18_w1" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d18_w1" android:roundIcon="@mipmap/ic_cal_d18_w1" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d19_w1" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d19_w1" android:roundIcon="@mipmap/ic_cal_d19_w1" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d20_w1" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d20_w1" android:roundIcon="@mipmap/ic_cal_d20_w1" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d21_w1" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d21_w1" android:roundIcon="@mipmap/ic_cal_d21_w1" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d22_w1" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d22_w1" android:roundIcon="@mipmap/ic_cal_d22_w1" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d23_w1" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d23_w1" android:roundIcon="@mipmap/ic_cal_d23_w1" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d24_w1" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d24_w1" android:roundIcon="@mipmap/ic_cal_d24_w1" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d25_w1" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d25_w1" android:roundIcon="@mipmap/ic_cal_d25_w1" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d26_w1" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d26_w1" android:roundIcon="@mipmap/ic_cal_d26_w1" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d27_w1" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d27_w1" android:roundIcon="@mipmap/ic_cal_d27_w1" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d28_w1" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d28_w1" android:roundIcon="@mipmap/ic_cal_d28_w1" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d29_w1" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d29_w1" android:roundIcon="@mipmap/ic_cal_d29_w1" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d30_w1" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d30_w1" android:roundIcon="@mipmap/ic_cal_d30_w1" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d31_w1" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d31_w1" android:roundIcon="@mipmap/ic_cal_d31_w1" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d1_w2" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d1_w2" android:roundIcon="@mipmap/ic_cal_d1_w2" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d2_w2" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d2_w2" android:roundIcon="@mipmap/ic_cal_d2_w2" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d3_w2" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d3_w2" android:roundIcon="@mipmap/ic_cal_d3_w2" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d4_w2" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d4_w2" android:roundIcon="@mipmap/ic_cal_d4_w2" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d5_w2" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d5_w2" android:roundIcon="@mipmap/ic_cal_d5_w2" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d6_w2" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d6_w2" android:roundIcon="@mipmap/ic_cal_d6_w2" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d7_w2" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d7_w2" android:roundIcon="@mipmap/ic_cal_d7_w2" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d8_w2" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d8_w2" android:roundIcon="@mipmap/ic_cal_d8_w2" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d9_w2" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d9_w2" android:roundIcon="@mipmap/ic_cal_d9_w2" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d10_w2" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d10_w2" android:roundIcon="@mipmap/ic_cal_d10_w2" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d11_w2" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d11_w2" android:roundIcon="@mipmap/ic_cal_d11_w2" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d12_w2" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d12_w2" android:roundIcon="@mipmap/ic_cal_d12_w2" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d13_w2" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d13_w2" android:roundIcon="@mipmap/ic_cal_d13_w2" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d14_w2" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d14_w2" android:roundIcon="@mipmap/ic_cal_d14_w2" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d15_w2" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d15_w2" android:roundIcon="@mipmap/ic_cal_d15_w2" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d16_w2" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d16_w2" android:roundIcon="@mipmap/ic_cal_d16_w2" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d17_w2" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d17_w2" android:roundIcon="@mipmap/ic_cal_d17_w2" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d18_w2" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d18_w2" android:roundIcon="@mipmap/ic_cal_d18_w2" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d19_w2" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d19_w2" android:roundIcon="@mipmap/ic_cal_d19_w2" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d20_w2" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d20_w2" android:roundIcon="@mipmap/ic_cal_d20_w2" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d21_w2" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d21_w2" android:roundIcon="@mipmap/ic_cal_d21_w2" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d22_w2" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d22_w2" android:roundIcon="@mipmap/ic_cal_d22_w2" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d23_w2" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d23_w2" android:roundIcon="@mipmap/ic_cal_d23_w2" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d24_w2" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d24_w2" android:roundIcon="@mipmap/ic_cal_d24_w2" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d25_w2" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d25_w2" android:roundIcon="@mipmap/ic_cal_d25_w2" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d26_w2" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d26_w2" android:roundIcon="@mipmap/ic_cal_d26_w2" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d27_w2" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d27_w2" android:roundIcon="@mipmap/ic_cal_d27_w2" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d28_w2" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d28_w2" android:roundIcon="@mipmap/ic_cal_d28_w2" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d29_w2" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d29_w2" android:roundIcon="@mipmap/ic_cal_d29_w2" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d30_w2" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d30_w2" android:roundIcon="@mipmap/ic_cal_d30_w2" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d31_w2" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d31_w2" android:roundIcon="@mipmap/ic_cal_d31_w2" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d1_w3" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d1_w3" android:roundIcon="@mipmap/ic_cal_d1_w3" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d2_w3" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d2_w3" android:roundIcon="@mipmap/ic_cal_d2_w3" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d3_w3" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d3_w3" android:roundIcon="@mipmap/ic_cal_d3_w3" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d4_w3" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d4_w3" android:roundIcon="@mipmap/ic_cal_d4_w3" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d5_w3" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d5_w3" android:roundIcon="@mipmap/ic_cal_d5_w3" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d6_w3" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d6_w3" android:roundIcon="@mipmap/ic_cal_d6_w3" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d7_w3" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d7_w3" android:roundIcon="@mipmap/ic_cal_d7_w3" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d8_w3" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d8_w3" android:roundIcon="@mipmap/ic_cal_d8_w3" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d9_w3" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d9_w3" android:roundIcon="@mipmap/ic_cal_d9_w3" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d10_w3" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d10_w3" android:roundIcon="@mipmap/ic_cal_d10_w3" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d11_w3" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d11_w3" android:roundIcon="@mipmap/ic_cal_d11_w3" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d12_w3" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d12_w3" android:roundIcon="@mipmap/ic_cal_d12_w3" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d13_w3" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d13_w3" android:roundIcon="@mipmap/ic_cal_d13_w3" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d14_w3" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d14_w3" android:roundIcon="@mipmap/ic_cal_d14_w3" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d15_w3" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d15_w3" android:roundIcon="@mipmap/ic_cal_d15_w3" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d16_w3" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d16_w3" android:roundIcon="@mipmap/ic_cal_d16_w3" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d17_w3" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d17_w3" android:roundIcon="@mipmap/ic_cal_d17_w3" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d18_w3" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d18_w3" android:roundIcon="@mipmap/ic_cal_d18_w3" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d19_w3" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d19_w3" android:roundIcon="@mipmap/ic_cal_d19_w3" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d20_w3" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d20_w3" android:roundIcon="@mipmap/ic_cal_d20_w3" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d21_w3" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d21_w3" android:roundIcon="@mipmap/ic_cal_d21_w3" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d22_w3" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d22_w3" android:roundIcon="@mipmap/ic_cal_d22_w3" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d23_w3" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d23_w3" android:roundIcon="@mipmap/ic_cal_d23_w3" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d24_w3" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d24_w3" android:roundIcon="@mipmap/ic_cal_d24_w3" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d25_w3" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d25_w3" android:roundIcon="@mipmap/ic_cal_d25_w3" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d26_w3" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d26_w3" android:roundIcon="@mipmap/ic_cal_d26_w3" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d27_w3" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d27_w3" android:roundIcon="@mipmap/ic_cal_d27_w3" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d28_w3" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d28_w3" android:roundIcon="@mipmap/ic_cal_d28_w3" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d29_w3" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d29_w3" android:roundIcon="@mipmap/ic_cal_d29_w3" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d30_w3" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d30_w3" android:roundIcon="@mipmap/ic_cal_d30_w3" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d31_w3" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d31_w3" android:roundIcon="@mipmap/ic_cal_d31_w3" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d1_w4" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d1_w4" android:roundIcon="@mipmap/ic_cal_d1_w4" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d2_w4" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d2_w4" android:roundIcon="@mipmap/ic_cal_d2_w4" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d3_w4" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d3_w4" android:roundIcon="@mipmap/ic_cal_d3_w4" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d4_w4" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d4_w4" android:roundIcon="@mipmap/ic_cal_d4_w4" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d5_w4" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d5_w4" android:roundIcon="@mipmap/ic_cal_d5_w4" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d6_w4" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d6_w4" android:roundIcon="@mipmap/ic_cal_d6_w4" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d7_w4" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d7_w4" android:roundIcon="@mipmap/ic_cal_d7_w4" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d8_w4" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d8_w4" android:roundIcon="@mipmap/ic_cal_d8_w4" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d9_w4" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d9_w4" android:roundIcon="@mipmap/ic_cal_d9_w4" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d10_w4" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d10_w4" android:roundIcon="@mipmap/ic_cal_d10_w4" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d11_w4" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d11_w4" android:roundIcon="@mipmap/ic_cal_d11_w4" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d12_w4" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d12_w4" android:roundIcon="@mipmap/ic_cal_d12_w4" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d13_w4" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d13_w4" android:roundIcon="@mipmap/ic_cal_d13_w4" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d14_w4" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d14_w4" android:roundIcon="@mipmap/ic_cal_d14_w4" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d15_w4" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d15_w4" android:roundIcon="@mipmap/ic_cal_d15_w4" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d16_w4" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d16_w4" android:roundIcon="@mipmap/ic_cal_d16_w4" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d17_w4" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d17_w4" android:roundIcon="@mipmap/ic_cal_d17_w4" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d18_w4" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d18_w4" android:roundIcon="@mipmap/ic_cal_d18_w4" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d19_w4" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d19_w4" android:roundIcon="@mipmap/ic_cal_d19_w4" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d20_w4" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d20_w4" android:roundIcon="@mipmap/ic_cal_d20_w4" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d21_w4" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d21_w4" android:roundIcon="@mipmap/ic_cal_d21_w4" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d22_w4" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d22_w4" android:roundIcon="@mipmap/ic_cal_d22_w4" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d23_w4" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d23_w4" android:roundIcon="@mipmap/ic_cal_d23_w4" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d24_w4" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d24_w4" android:roundIcon="@mipmap/ic_cal_d24_w4" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d25_w4" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d25_w4" android:roundIcon="@mipmap/ic_cal_d25_w4" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d26_w4" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d26_w4" android:roundIcon="@mipmap/ic_cal_d26_w4" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d27_w4" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d27_w4" android:roundIcon="@mipmap/ic_cal_d27_w4" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d28_w4" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d28_w4" android:roundIcon="@mipmap/ic_cal_d28_w4" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d29_w4" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d29_w4" android:roundIcon="@mipmap/ic_cal_d29_w4" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d30_w4" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d30_w4" android:roundIcon="@mipmap/ic_cal_d30_w4" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d31_w4" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d31_w4" android:roundIcon="@mipmap/ic_cal_d31_w4" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d1_w5" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d1_w5" android:roundIcon="@mipmap/ic_cal_d1_w5" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d2_w5" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d2_w5" android:roundIcon="@mipmap/ic_cal_d2_w5" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d3_w5" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d3_w5" android:roundIcon="@mipmap/ic_cal_d3_w5" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d4_w5" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d4_w5" android:roundIcon="@mipmap/ic_cal_d4_w5" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d5_w5" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d5_w5" android:roundIcon="@mipmap/ic_cal_d5_w5" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d6_w5" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d6_w5" android:roundIcon="@mipmap/ic_cal_d6_w5" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d7_w5" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d7_w5" android:roundIcon="@mipmap/ic_cal_d7_w5" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d8_w5" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d8_w5" android:roundIcon="@mipmap/ic_cal_d8_w5" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d9_w5" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d9_w5" android:roundIcon="@mipmap/ic_cal_d9_w5" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d10_w5" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d10_w5" android:roundIcon="@mipmap/ic_cal_d10_w5" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d11_w5" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d11_w5" android:roundIcon="@mipmap/ic_cal_d11_w5" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d12_w5" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d12_w5" android:roundIcon="@mipmap/ic_cal_d12_w5" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d13_w5" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d13_w5" android:roundIcon="@mipmap/ic_cal_d13_w5" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d14_w5" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d14_w5" android:roundIcon="@mipmap/ic_cal_d14_w5" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d15_w5" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d15_w5" android:roundIcon="@mipmap/ic_cal_d15_w5" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d16_w5" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d16_w5" android:roundIcon="@mipmap/ic_cal_d16_w5" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d17_w5" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d17_w5" android:roundIcon="@mipmap/ic_cal_d17_w5" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d18_w5" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d18_w5" android:roundIcon="@mipmap/ic_cal_d18_w5" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d19_w5" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d19_w5" android:roundIcon="@mipmap/ic_cal_d19_w5" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d20_w5" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d20_w5" android:roundIcon="@mipmap/ic_cal_d20_w5" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d21_w5" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d21_w5" android:roundIcon="@mipmap/ic_cal_d21_w5" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d22_w5" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d22_w5" android:roundIcon="@mipmap/ic_cal_d22_w5" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d23_w5" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d23_w5" android:roundIcon="@mipmap/ic_cal_d23_w5" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d24_w5" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d24_w5" android:roundIcon="@mipmap/ic_cal_d24_w5" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d25_w5" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d25_w5" android:roundIcon="@mipmap/ic_cal_d25_w5" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d26_w5" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d26_w5" android:roundIcon="@mipmap/ic_cal_d26_w5" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d27_w5" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d27_w5" android:roundIcon="@mipmap/ic_cal_d27_w5" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d28_w5" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d28_w5" android:roundIcon="@mipmap/ic_cal_d28_w5" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d29_w5" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d29_w5" android:roundIcon="@mipmap/ic_cal_d29_w5" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d30_w5" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d30_w5" android:roundIcon="@mipmap/ic_cal_d30_w5" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d31_w5" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d31_w5" android:roundIcon="@mipmap/ic_cal_d31_w5" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d1_w6" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d1_w6" android:roundIcon="@mipmap/ic_cal_d1_w6" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d2_w6" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d2_w6" android:roundIcon="@mipmap/ic_cal_d2_w6" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d3_w6" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d3_w6" android:roundIcon="@mipmap/ic_cal_d3_w6" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d4_w6" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d4_w6" android:roundIcon="@mipmap/ic_cal_d4_w6" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d5_w6" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d5_w6" android:roundIcon="@mipmap/ic_cal_d5_w6" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d6_w6" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d6_w6" android:roundIcon="@mipmap/ic_cal_d6_w6" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d7_w6" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d7_w6" android:roundIcon="@mipmap/ic_cal_d7_w6" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d8_w6" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d8_w6" android:roundIcon="@mipmap/ic_cal_d8_w6" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d9_w6" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d9_w6" android:roundIcon="@mipmap/ic_cal_d9_w6" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d10_w6" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d10_w6" android:roundIcon="@mipmap/ic_cal_d10_w6" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d11_w6" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d11_w6" android:roundIcon="@mipmap/ic_cal_d11_w6" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d12_w6" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d12_w6" android:roundIcon="@mipmap/ic_cal_d12_w6" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d13_w6" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d13_w6" android:roundIcon="@mipmap/ic_cal_d13_w6" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d14_w6" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d14_w6" android:roundIcon="@mipmap/ic_cal_d14_w6" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d15_w6" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d15_w6" android:roundIcon="@mipmap/ic_cal_d15_w6" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d16_w6" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d16_w6" android:roundIcon="@mipmap/ic_cal_d16_w6" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d17_w6" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d17_w6" android:roundIcon="@mipmap/ic_cal_d17_w6" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d18_w6" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d18_w6" android:roundIcon="@mipmap/ic_cal_d18_w6" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d19_w6" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d19_w6" android:roundIcon="@mipmap/ic_cal_d19_w6" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d20_w6" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d20_w6" android:roundIcon="@mipmap/ic_cal_d20_w6" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d21_w6" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d21_w6" android:roundIcon="@mipmap/ic_cal_d21_w6" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d22_w6" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d22_w6" android:roundIcon="@mipmap/ic_cal_d22_w6" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d23_w6" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d23_w6" android:roundIcon="@mipmap/ic_cal_d23_w6" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d24_w6" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d24_w6" android:roundIcon="@mipmap/ic_cal_d24_w6" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d25_w6" android:enabled="true" android:exported="true" android:icon="@mipmap/ic_cal_d25_w6" android:roundIcon="@mipmap/ic_cal_d25_w6" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d26_w6" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d26_w6" android:roundIcon="@mipmap/ic_cal_d26_w6" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d27_w6" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d27_w6" android:roundIcon="@mipmap/ic_cal_d27_w6" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d28_w6" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d28_w6" android:roundIcon="@mipmap/ic_cal_d28_w6" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d29_w6" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d29_w6" android:roundIcon="@mipmap/ic_cal_d29_w6" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d30_w6" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d30_w6" android:roundIcon="@mipmap/ic_cal_d30_w6" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".CalendarIcon_d31_w6" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d31_w6" android:roundIcon="@mipmap/ic_cal_d31_w6" android:targetActivity=".MainActivity" android:label="@string/app_name">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+  </application>
+</manifest>
