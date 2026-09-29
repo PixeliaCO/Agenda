@@ -336,7 +336,7 @@ export function ChangeRepeatScreen({
         minHeight: 28,
         paddingHorizontal: 2,
         paddingVertical: 4,
-        backgroundColor: '#ffffff',
+        backgroundColor: colors.fieldFill,
       },
       pdFieldChevron: { fontSize: fs(11), color: colors.textSecondary, marginLeft: 8 },
       fieldUnderline: { flexDirection: 'row' as const, overflow: 'hidden' as const, height: 2 },
@@ -348,7 +348,7 @@ export function ChangeRepeatScreen({
         color: colors.text,
       },
       pdFieldInput: {
-        backgroundColor: '#ffffff',
+        backgroundColor: colors.fieldFill,
         paddingHorizontal: 2,
         paddingVertical: 4,
         minHeight: 28,
@@ -364,7 +364,7 @@ export function ChangeRepeatScreen({
         height: 28,
         justifyContent: 'center' as const,
         paddingHorizontal: 2,
-        backgroundColor: '#ffffff',
+        backgroundColor: colors.fieldFill,
       },
       everyNumberInput: {
         height: 28,
@@ -439,7 +439,7 @@ export function ChangeRepeatScreen({
         zIndex: 50,
       },
       subModalCard: {
-        backgroundColor: '#ffffff',
+        backgroundColor: colors.cardBackground,
         borderRadius: 0,
         borderWidth: 1,
         borderColor: colors.line,

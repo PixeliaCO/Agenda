@@ -28,17 +28,15 @@ export function getDayIndexFromDate(dateISO: string): number {
   return day === 0 ? 6 : day - 1;
 }
 
-/** Formatea YYYY-MM-DD a "miércoles 24 junio 2026" */
+/** Formatea YYYY-MM-DD a "24 junio 2026" (sin día de la semana; ya va en el selector). */
 const MONTHS_SHORT = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
 const MONTHS_LONG = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 const WEEKDAY_LONG = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
 
 export function formatDisplayDate(dateISO: string): string {
-  const d = new Date(dateISO + 'T12:00:00');
   const [y, m, day] = dateISO.split('-').map(Number);
-  const weekday = WEEKDAY_LONG[d.getDay()].toLowerCase();
   const month = MONTHS_LONG[m - 1].toLowerCase();
-  return `${weekday} ${day} ${month} ${y}`;
+  return `${day} ${month} ${y}`;
 }
 
 function pad2(n: number): string {
@@ -105,10 +103,9 @@ export function addDays(dateISO: string, days: number): string {
   return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate());
 }
 
-/** Fecha del día (0 = Lunes, 6 = Domingo) en la semana que contiene dateISO */
+/** Fecha del día (0 = Lunes, 6 = Domingo) en la semana lun–dom que contiene dateISO */
 export function getDateForDayIndexInWeek(dateISO: string, dayIndex: number): string {
-  const weekDates = getWeekDates(new Date(dateISO + 'T12:00:00'));
-  return weekDates[dayIndex === 6 ? 0 : dayIndex + 1];
+  return addDays(dateISO, dayIndex - getDayIndexFromDate(dateISO));
 }
 
 /** Convierte "HH:mm" (24h) a formato 12h para mostrar: "9:45 a. m." / "1:30 p. m." */

@@ -91,6 +91,9 @@ export function AgendaScreen() {
   const [titleEditDraft, setTitleEditDraft] = useState('');
   const titleEditReminderIdRef = useRef<string | null>(null);
   const titleEditDraftRef = useRef('');
+  /** Tras mover una cita de día: conservar la selección al cambiar `selectedDate`. */
+  const moveKeepSelectionRef = useRef<Reminder | null>(null);
+  const [reminderDragActive, setReminderDragActive] = useState(false);
   const [, setScheduleRefreshKey] = useState(0);
 
   useEffect(() => {
@@ -170,7 +173,9 @@ export function AgendaScreen() {
   }, []);
 
   useEffect(() => {
-    setSelectedReminder(null);
+    const keep = moveKeepSelectionRef.current;
+    moveKeepSelectionRef.current = null;
+    setSelectedReminder(keep);
     setTitleEditReminderId(null);
     setTitleEditDraft('');
     titleEditReminderIdRef.current = null;
@@ -286,6 +291,7 @@ export function AgendaScreen() {
   const daySwipeGesture = useMemo(
     () =>
       Gesture.Pan()
+        .enabled(!reminderDragActive)
         .activeOffsetX([-36, 36])
         .failOffsetY([-22, 22])
         .onEnd((e) => {
@@ -302,7 +308,7 @@ export function AgendaScreen() {
             else runOnJS(handlePrevious)();
           }
         }),
-    [handleNext, handlePrevious]
+    [handleNext, handlePrevious, reminderDragActive]
   );
 
   const handleSelectDay = (dayIndex: number) => {
@@ -312,7 +318,7 @@ export function AgendaScreen() {
   /**
    * Pulsar la fila de una hora siempre abre crear en esa franja.
    * Los eventos largos ocupan varias filas: no abrir detalles/edición del evento al tocar otra hora;
-   * título del evento → edición inline; columna de hora de ese evento → modal de detalles.
+   * título del evento → edición inline; columna de hora de ese evento → selector de hora.
    */
   const handleSlotPress = (payload: {
     hourLabel: string;
@@ -359,9 +365,6 @@ export function AgendaScreen() {
       startTime,
       endTime,
       title,
-      alarm: true,
-      alarmOffset: 5,
-      alarmUnit: 'minutes',
     });
     await syncReminderNotification(created);
     await loadReminders();
@@ -407,6 +410,37 @@ export function AgendaScreen() {
     return true;
   }, [handleDelete, handleUpdate]);
 
+  const handleReminderReschedule = useCallback(
+    async (
+      id: string,
+      payload: { date: string; startTime: string; endTime: string }
+    ) => {
+      commitPendingTitleEdit();
+      setInlineSlot(null);
+      setTitleEditReminderId(null);
+      setTitleEditDraft('');
+      titleEditReminderIdRef.current = null;
+      setDetailsVisible(false);
+      setDetailsInitialTarget(null);
+
+      await clearAcksForReminder(id);
+      const updated = await updateReminder(id, payload);
+      if (updated) await syncReminderNotification(updated);
+      await loadReminders();
+      await loadWeekReminders();
+
+      if (updated) {
+        if (updated.date !== selectedDate) {
+          moveKeepSelectionRef.current = updated;
+          setSelectedDate(updated.date);
+        } else {
+          setSelectedReminder(updated);
+        }
+      }
+    },
+    [commitPendingTitleEdit, loadReminders, loadWeekReminders, selectedDate]
+  );
+
   const handleDetalles = useCallback(() => {
     setDetailsInitialTarget(null);
     if (!commitPendingTitleEdit()) return;
@@ -439,21 +473,6 @@ export function AgendaScreen() {
       setDetailsInitialTarget(null);
       setDetailsDefaultStartTime(slotLabelTo24H(hourLabel));
       setDetailsDefaultTitle(draftTitle?.trim() ?? '');
-      setDetailsVisible(true);
-    },
-    [commitPendingTitleEdit]
-  );
-
-  const handleReminderAlarmIconPress = useCallback(
-    (r: Reminder) => {
-      if (!commitPendingTitleEdit()) return;
-      setTitleEditReminderId(null);
-      setTitleEditDraft('');
-      titleEditReminderIdRef.current = null;
-      setSelectedReminder(r);
-      setDetailsDefaultStartTime(undefined);
-      setDetailsDefaultTitle('');
-      setDetailsInitialTarget('alarm');
       setDetailsVisible(true);
     },
     [commitPendingTitleEdit]
@@ -685,6 +704,7 @@ export function AgendaScreen() {
               hourMinutes={scheduleHourMinutes}
               reminders={timedReminders}
               pinNoTime={noTimeReminders}
+              selectedDate={selectedDate}
               onSlotPress={handleSlotPress}
               onReminderPress={(r) => {
                 titleEditReminderIdRef.current = r.id;
@@ -693,10 +713,11 @@ export function AgendaScreen() {
                 setSelectedReminder(r);
                 setInlineSlot(null);
               }}
+              onReminderReschedule={handleReminderReschedule}
+              onReminderDragActiveChange={setReminderDragActive}
               onReminderHourPress={handleReminderHourPress}
               onEmptyHourPress={handleEmptyHourPress}
               onEmptyHourLabelPress={handleEmptyHourLabelPress}
-              onReminderAlarmIconPress={handleReminderAlarmIconPress}
               onReminderNoteIconPress={handleReminderNoteIconPress}
               selectedReminderId={selectedReminder?.id ?? null}
               inlineSlot={inlineSlot}
@@ -737,6 +758,8 @@ export function AgendaScreen() {
             reminders={weekReminders}
             onCellPress={handleWeekCellPress}
             onReminderPress={handleWeekReminderPress}
+            onReminderReschedule={handleReminderReschedule}
+            onReminderDragActiveChange={setReminderDragActive}
           />
         </View>
       )}

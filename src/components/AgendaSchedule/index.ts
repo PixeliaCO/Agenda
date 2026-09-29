@@ -3,4 +3,4 @@
  */
 
 export { AgendaSchedule } from './AgendaSchedule';
-export type { AgendaScheduleProps } from './AgendaSchedule';
+export type { AgendaScheduleProps, ReminderReschedulePayload } from './AgendaSchedule';

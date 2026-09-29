@@ -96,7 +96,7 @@ export function DaySummaryView({ reminders, onReminderPress }: DaySummaryViewPro
               <View style={styles.titleWrap}>
                 <EventTitleWithIcons
                   title={r.title}
-                  showAlarm={Boolean(r.alarm && !r.noTime)}
+                  showAlarm={!r.noTime}
                   showNote={Boolean(r.note?.trim())}
                   textStyle={styles.title}
                   iconSize={Math.max(18, Math.round(fs(14) * 1.2))}

@@ -16,12 +16,17 @@ import {
   KeyboardAvoidingView,
   Keyboard,
 } from 'react-native';
-import { ScrollView } from 'react-native-gesture-handler';
+import { Gesture, GestureDetector, ScrollView } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { DEFAULT_HOURS, slotLabelTo24H } from '../../constants/agenda';
 import { usePreferences } from '../../contexts/PreferencesContext';
 import type { Reminder } from '../../types/reminder';
-import { minutesToScheduleLabel, reminderEndMinutesForLayout } from '../../utils/scheduleHours';
+import {
+  minutesToScheduleLabel,
+  reminderEndMinutesForLayout,
+  rescheduleKeepingDuration,
+  timeToMinutes as timeToMinutesShared,
+} from '../../utils/scheduleHours';
 import { scaledFontSize, titleFont } from '../../utils/typography';
 import { EventTitleWithIcons } from '../EventTitleWithIcons';
 
@@ -49,7 +54,6 @@ const SLOT_BOX_PADDING = 3;
 const BAR_WIDTH = 14;
 /** Hueco entre franja y números de hora (evita que el texto roce la línea divisoria). */
 const TIME_FRANJA_GAP = 6;
-const TIME_COLUMN_COMBINED_WIDTH = BAR_WIDTH + TIME_FRANJA_GAP + TIME_COLUMN_WIDTH;
 /** Posición X donde empieza la columna de horas (tras franja + hueco). */
 const HOUR_COLUMN_LEFT = BAR_WIDTH + TIME_FRANJA_GAP;
 
@@ -58,9 +62,14 @@ const SCHEDULE_SCREEN_INSET = 0;
 
 /** "HH:mm" a minutos desde medianoche */
 function timeToMinutes(time: string): number {
-  const [h, m] = time.split(':').map(Number);
-  return h * 60 + (m || 0);
+  return timeToMinutesShared(time);
 }
+
+export type ReminderReschedulePayload = {
+  date: string;
+  startTime: string;
+  endTime: string;
+};
 
 export type AgendaScheduleProps = {
   /** Lista de horas a mostrar. Por defecto usa DEFAULT_HOURS. */
@@ -71,17 +80,22 @@ export type AgendaScheduleProps = {
   reminders?: Reminder[];
   /** Sin hora: se muestran arriba de la cuadrícula */
   pinNoTime?: Reminder[];
+  /** Fecha del día visible (YYYY-MM-DD); necesaria para drag horizontal entre días. */
+  selectedDate?: string;
   /** Se llama al pulsar la fila de una hora (crear en esa franja; no usar para abrir eventos existentes). */
   onSlotPress?: (payload: { hourLabel: string; hourIndex: number; fragmentIndex: number }) => void;
   /** Pulsar el título del evento: edición inline del título. */
   onReminderPress?: (reminder: Reminder) => void;
-  /** Pulsar la hora de inicio en la columna de horas: detalles completos (modal). */
+  /** Long-press + drag: nueva fecha/hora al soltar. */
+  onReminderReschedule?: (reminderId: string, payload: ReminderReschedulePayload) => void;
+  /** true mientras hay un drag de cita activo (p. ej. para pausar swipe de día). */
+  onReminderDragActiveChange?: (active: boolean) => void;
+  /** Pulsar la hora de inicio en la columna de horas: selector de hora. */
   onReminderHourPress?: (reminder: Reminder) => void;
   /** Pulsar la hora en una franja vacía: mismo modal que «Nuevo», con esa hora. */
   onEmptyHourPress?: (hourLabel: string, draftTitle?: string) => void;
   /** Pulsar el número de hora en una franja vacía: abre el modal «Nuevo» con esa hora. */
   onEmptyHourLabelPress?: (hourLabel: string, hourIndex: number) => void;
-  onReminderAlarmIconPress?: (reminder: Reminder) => void;
   onReminderNoteIconPress?: (reminder: Reminder) => void;
   /** ID del recordatorio seleccionado (resaltado en la lista) */
   selectedReminderId?: string | null;
@@ -146,8 +160,8 @@ function yFromMinute(
       return Math.round(y0);
     }
     if (minutes < re) {
-      const t = d > 0 ? ((minutes - rs) / d) * h : 0;
-      return Math.round(y0 + t * h);
+      const frac = d > 0 ? (minutes - rs) / d : 0;
+      return Math.round(y0 + frac * h);
     }
     if (minutes === re) {
       return Math.round(y0 + h);
@@ -156,6 +170,36 @@ function yFromMinute(
   let total = 0;
   for (const r of rowLayout) total += r.heightPx;
   return Math.round(total);
+}
+
+/**
+ * Al soltar el drag, alinear con la etiqueta de fila más cercana (6:00, 8:30, 9:00…).
+ * Así “apuntar a las 9:00” guarda 9:00, no 8:30 por interpolación/snap.
+ */
+function nearestRowStartMinFromY(
+  y: number,
+  hours: readonly string[],
+  hourMinutes: number[] | undefined,
+  rowLayout: { durationMin: number; heightPx: number }[]
+): number {
+  if (hours.length === 0) return 0;
+  let bestMin = getRowStartMin(hours, hourMinutes, 0);
+  let bestDist = Infinity;
+  let acc = 0;
+  for (let i = 0; i < hours.length; i++) {
+    const rs = getRowStartMin(hours, hourMinutes, i);
+    const dist = Math.abs(y - acc);
+    if (dist < bestDist) {
+      bestDist = dist;
+      bestMin = rs;
+    }
+    acc += rowLayout[i]?.heightPx ?? HOUR_ROW_HEIGHT;
+  }
+  // También considerar el borde final de la última fila
+  const lastEnd = getRowEndMin(hours, hourMinutes, hours.length - 1);
+  const distEnd = Math.abs(y - acc);
+  if (distEnd < bestDist) return lastEnd;
+  return bestMin;
 }
 
 /** Suma de alturas de filas 0..i-1 (inicio en Y del bloque hora i). */
@@ -225,17 +269,35 @@ function assignEventLanes(reminders: Reminder[]): { laneById: Map<string, number
   return { laneById, maxLanes };
 }
 
+const REMINDER_LONG_PRESS_MS = 450;
+const DRAG_MOVE_THRESHOLD_PX = 8;
+
+type DragVisualState = {
+  reminderId: string;
+  title: string;
+  color: string;
+  originTop: number;
+  height: number;
+  tx: number;
+  ty: number;
+  /** Posición del dedo en ventana (ghost flotante encima de todo). */
+  fingerX: number;
+  fingerY: number;
+};
+
 export function AgendaSchedule({
   hours = DEFAULT_HOURS,
   hourMinutes,
   reminders = [],
   pinNoTime = [],
+  selectedDate,
   onSlotPress,
   onReminderPress,
+  onReminderReschedule,
+  onReminderDragActiveChange,
   onReminderHourPress,
   onEmptyHourPress,
   onEmptyHourLabelPress,
-  onReminderAlarmIconPress,
   onReminderNoteIconPress,
   selectedReminderId = null,
   inlineSlot = null,
@@ -250,6 +312,7 @@ export function AgendaSchedule({
   const { colors, fontScale } = usePreferences();
   const insets = useSafeAreaInsets();
   const scrollRef = useRef<ScrollView>(null);
+  const rootOffsetRef = useRef({ x: 0, y: 0 });
   /** Enfoque explícito: tras cerrar un modal, `autoFocus` en el `TextInput` del título suele fallar. */
   const titleEditInputRef = useRef<ElementRef<typeof TextInput> | null>(null);
   const [pinnedHeaderHeight, setPinnedHeaderHeight] = useState(0);
@@ -257,6 +320,20 @@ export function AgendaSchedule({
   const [keyboardBottomPad, setKeyboardBottomPad] = useState(0);
   const [inlineTitle, setInlineTitle] = useState('');
   const inlineCommittedRef = useRef(false);
+  const [dragVisual, setDragVisual] = useState<DragVisualState | null>(null);
+  const dragSessionRef = useRef<{
+    reminder: Reminder;
+    originTop: number;
+    moved: boolean;
+  } | null>(null);
+  const eventBarPathsRef = useRef<
+    { id: string; color: string; top: number; height: number }[]
+  >([]);
+  const rowLayoutRef = useRef<{ durationMin: number; heightPx: number }[]>([]);
+  const hoursRef = useRef(hours);
+  const hourMinutesRef = useRef(hourMinutes);
+  const onReminderRescheduleRef = useRef(onReminderReschedule);
+  const onReminderDragActiveChangeRef = useRef(onReminderDragActiveChange);
 
   useEffect(() => {
     const showEvt = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
@@ -316,6 +393,9 @@ export function AgendaSchedule({
   }, [titleEditReminderId, onCommitTitleEdit, inlineSlot, hours, tryCommitInline]);
   const scaledMinRowHeight = Math.max(MIN_ROW_HEIGHT, Math.round(MIN_ROW_HEIGHT * fontScale));
   const fs = (n: number) => scaledFontSize(n, fontScale);
+  /** La columna de horas crece con el tamaño de letra para que "12:30" nunca se recorte. */
+  const timeColW = Math.round(TIME_COLUMN_WIDTH * Math.max(1, fontScale));
+  const timeColCombinedW = HOUR_COLUMN_LEFT + timeColW;
   const rowMinH = Math.max(MIN_ROW_HEIGHT, Math.round(MIN_ROW_HEIGHT * fontScale));
   const eventTitleFontSize = fs(14);
   const eventRowPaddingV = Math.max(2, Math.round(2 * fontScale));
@@ -555,6 +635,141 @@ export function AgendaSchedule({
     remindersByRowIndex,
   ]);
 
+  eventBarPathsRef.current = eventBarPaths;
+  rowLayoutRef.current = rowLayout;
+  hoursRef.current = hours;
+  hourMinutesRef.current = hourMinutes;
+  onReminderRescheduleRef.current = onReminderReschedule;
+  onReminderDragActiveChangeRef.current = onReminderDragActiveChange;
+
+  const beginReminderDrag = useCallback((r: Reminder, fingerX = 0, fingerY = 0) => {
+    if (r.noTime || r.allDay || !onReminderRescheduleRef.current) return;
+    const path = eventBarPathsRef.current.find((p) => p.id === r.id);
+    const originTop = path?.top ?? yFromMinute(
+      timeToMinutes(r.startTime),
+      hoursRef.current,
+      hourMinutesRef.current,
+      rowLayoutRef.current
+    );
+    const height =
+      path?.height ??
+      Math.max(
+        20,
+        yFromMinute(
+          reminderEndMinutesForLayout(r.startTime, r.endTime),
+          hoursRef.current,
+          hourMinutesRef.current,
+          rowLayoutRef.current
+        ) - originTop
+      );
+    const color = path?.color ?? colors.reminderDefault;
+    dragSessionRef.current = { reminder: r, originTop, moved: false };
+    setDragVisual({
+      reminderId: r.id,
+      title: r.title,
+      color,
+      originTop,
+      height,
+      tx: 0,
+      ty: 0,
+      fingerX,
+      fingerY,
+    });
+    onReminderDragActiveChangeRef.current?.(true);
+  }, [colors.reminderDefault]);
+
+  const updateReminderDrag = useCallback((tx: number, ty: number, absoluteX: number, absoluteY: number) => {
+    const session = dragSessionRef.current;
+    if (!session) return;
+    // Solo movimiento vertical cuenta (en día no se cambia fecha).
+    if (Math.abs(ty) >= DRAG_MOVE_THRESHOLD_PX) {
+      session.moved = true;
+    }
+    setDragVisual((prev) =>
+      prev ? { ...prev, tx: 0, ty, fingerX: absoluteX, fingerY: absoluteY } : prev
+    );
+  }, []);
+
+  const endReminderDrag = useCallback((tx: number, ty: number) => {
+    const session = dragSessionRef.current;
+    if (!session) {
+      setDragVisual(null);
+      onReminderDragActiveChangeRef.current?.(false);
+      return;
+    }
+    const moved =
+      session.moved || Math.abs(ty) >= DRAG_MOVE_THRESHOLD_PX;
+    dragSessionRef.current = null;
+    setDragVisual(null);
+    onReminderDragActiveChangeRef.current?.(false);
+    if (!moved) return;
+    const r = session.reminder;
+    const newY = session.originTop + ty;
+    const snappedRowMin = nearestRowStartMinFromY(
+      newY,
+      hoursRef.current,
+      hourMinutesRef.current,
+      rowLayoutRef.current
+    );
+    const times = rescheduleKeepingDuration(r.startTime, r.endTime, snappedRowMin);
+    const newDate = r.date;
+    if (
+      times.startTime === r.startTime &&
+      times.endTime === (r.endTime ?? times.endTime)
+    ) {
+      return;
+    }
+    onReminderRescheduleRef.current?.(r.id, {
+      date: newDate,
+      startTime: times.startTime,
+      endTime: times.endTime,
+    });
+  }, []);
+
+  const cancelReminderDrag = useCallback(() => {
+    if (!dragSessionRef.current && !dragVisual) return;
+    dragSessionRef.current = null;
+    setDragVisual(null);
+    onReminderDragActiveChangeRef.current?.(false);
+  }, [dragVisual]);
+
+  const buildReminderDragGesture = useCallback(
+    (r: Reminder, onTap: () => void) => {
+      if (r.noTime || r.allDay || !onReminderReschedule) {
+        return Gesture.Tap().runOnJS(true).onEnd(() => onTap());
+      }
+      /** Resalta apenas se cumple el long press (antes de arrastrar). */
+      const longPress = Gesture.LongPress()
+        .minDuration(REMINDER_LONG_PRESS_MS)
+        .maxDistance(14)
+        .runOnJS(true)
+        .onStart((e) => {
+          beginReminderDrag(r, e.absoluteX, e.absoluteY);
+        });
+      const pan = Gesture.Pan()
+        .activateAfterLongPress(REMINDER_LONG_PRESS_MS)
+        .activeOffsetY([-6, 6])
+        .failOffsetX([-28, 28])
+        .runOnJS(true)
+        .onUpdate((e) =>
+          updateReminderDrag(e.translationX, e.translationY, e.absoluteX, e.absoluteY)
+        )
+        .onEnd((e) => endReminderDrag(e.translationX, e.translationY))
+        .onFinalize((_e, success) => {
+          if (!success) cancelReminderDrag();
+        });
+      const tap = Gesture.Tap().runOnJS(true).onEnd(() => onTap());
+      return Gesture.Exclusive(Gesture.Simultaneous(longPress, pan), tap);
+    },
+    [
+      onReminderReschedule,
+      beginReminderDrag,
+      updateReminderDrag,
+      endReminderDrag,
+      cancelReminderDrag,
+    ]
+  );
+
   const styles = useMemo(
     () =>
       StyleSheet.create({
@@ -594,6 +809,7 @@ export function AgendaSchedule({
         pinnedHeadingNotaIcon: {
           width: Math.max(24, Math.round(22 * fontScale)),
           height: Math.max(24, Math.round(22 * fontScale)),
+          tintColor: colors.iconActive,
         },
         pinnedRow: {
           paddingVertical: eventRowPaddingV,
@@ -674,7 +890,7 @@ export function AgendaSchedule({
         hourRowSeparator: {
           position: 'absolute' as const,
           // Los puntos empiezan DESPUÉS de la columna de horas (no sobre ni antes del número).
-          left: TIME_COLUMN_COMBINED_WIDTH,
+          left: timeColCombinedW,
           right: 0,
           bottom: 0,
           height: 3,
@@ -708,11 +924,42 @@ export function AgendaSchedule({
           height: '100%' as const,
           position: 'relative' as const,
         },
+        dragGhost: {
+          position: 'absolute' as const,
+          zIndex: 99999,
+          elevation: 99999,
+          flexDirection: 'row' as const,
+          alignItems: 'center' as const,
+          pointerEvents: 'none' as const,
+          minWidth: 140,
+          maxWidth: 220,
+          paddingVertical: 6,
+          paddingHorizontal: 8,
+          borderRadius: 4,
+          borderWidth: 2,
+          shadowColor: '#000',
+          shadowOpacity: 0.35,
+          shadowRadius: 8,
+          shadowOffset: { width: 0, height: 4 },
+        },
+        dragGhostBar: {
+          width: BAR_WIDTH,
+          borderRadius: 2,
+          marginRight: 8,
+          alignSelf: 'stretch' as const,
+          minHeight: 28,
+        },
+        dragGhostTitle: {
+          flex: 1,
+          fontSize: eventTitleFontSize,
+          color: colors.text,
+          ...titleFont,
+        },
         /** Bloque izquierdo: columna franja + columna hora (ancho fijo total). */
         leftColumnsRow: {
           flexDirection: 'row' as const,
           alignItems: 'stretch' as const,
-          width: TIME_COLUMN_COMBINED_WIDTH,
+          width: timeColCombinedW,
           backgroundColor: 'transparent',
           pointerEvents: 'box-none' as const,
         },
@@ -724,7 +971,7 @@ export function AgendaSchedule({
         },
         /** Columna 2: hora alineada a la derecha (como el Palm), centrada en vertical. */
         hourColumn: {
-          width: TIME_COLUMN_WIDTH,
+          width: timeColW,
           marginLeft: TIME_FRANJA_GAP,
           flexShrink: 0,
           justifyContent: 'center' as const,
@@ -821,6 +1068,8 @@ export function AgendaSchedule({
       eventRowPaddingH,
       eventRowMinHeight,
       fs,
+      timeColW,
+      timeColCombinedW,
     ]
   );
 
@@ -863,7 +1112,7 @@ export function AgendaSchedule({
             >
               <Image
                 source={alarmaPng}
-                style={{ width: eventIconSz, height: eventIconSz, marginLeft: 8 }}
+                style={{ width: eventIconSz, height: eventIconSz, marginLeft: 8, tintColor: colors.iconActive }}
                 resizeMode="contain"
               />
             </Pressable>
@@ -882,14 +1131,16 @@ export function AgendaSchedule({
       >
         <EventTitleWithIcons
           title={r.title}
-          showAlarm={Boolean(r.alarm && !r.noTime)}
+          showAlarm={!r.noTime}
           showNote={Boolean(r.note?.trim())}
           textStyle={styles.eventTextTitle}
           iconSize={iconSz}
           numberOfLines={2}
           onTitlePress={() => onReminderPress?.(r)}
           onAlarmPress={
-            r.alarm && !r.noTime ? () => onReminderAlarmIconPress?.(r) : undefined
+            !r.noTime
+              ? () => (onReminderHourPress ?? onReminderPress)?.(r)
+              : undefined
           }
           onNotePress={
             r.note?.trim() ? () => onReminderNoteIconPress?.(r) : undefined
@@ -921,6 +1172,15 @@ export function AgendaSchedule({
 
   return (
     <Root {...rootProps}>
+      <View
+        style={{ flex: 1 }}
+        collapsable={false}
+        onLayout={(e) => {
+          e.currentTarget.measureInWindow?.((x, y) => {
+            rootOffsetRef.current = { x, y };
+          });
+        }}
+      >
       <ScrollView
         ref={scrollRef}
         style={styles.scroll}
@@ -929,6 +1189,7 @@ export function AgendaSchedule({
         keyboardShouldPersistTaps="always"
         keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
         automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
+        scrollEnabled={dragVisual == null}
       >
       {hasPinned ? (
         <View
@@ -961,7 +1222,7 @@ export function AgendaSchedule({
               styles.hourZoneBackdrop,
               {
                 left: HOUR_COLUMN_LEFT,
-                width: TIME_COLUMN_WIDTH,
+                width: timeColW,
                 height: totalGridHeight,
               },
             ]}
@@ -974,7 +1235,7 @@ export function AgendaSchedule({
           <View
             style={[
               styles.timeColumnConnector,
-              { left: HOUR_COLUMN_LEFT + TIME_COLUMN_WIDTH, height: totalGridHeight },
+              { left: HOUR_COLUMN_LEFT + timeColW, height: totalGridHeight },
             ]}
             pointerEvents="none"
           />
@@ -1034,8 +1295,8 @@ export function AgendaSchedule({
                       </View>
                       <View style={styles.hourColumn}>
                         {eventsWithTitleHere.length === 1 ? (
-                          <Pressable
-                            onPress={() => {
+                          <GestureDetector
+                            gesture={buildReminderDragGesture(eventsWithTitleHere[0], () => {
                               const r = eventsWithTitleHere[0];
                               if (r?.id === titleEditReminderId) {
                                 onCommitTitleEdit?.();
@@ -1043,15 +1304,27 @@ export function AgendaSchedule({
                               }
                               if (inlineSlot != null) tryCommitInlineAtActiveSlot();
                               if (r) (onReminderHourPress ?? onReminderPress)?.(r);
-                            }}
-                            hitSlop={8}
-                            accessibilityRole="button"
-                            accessibilityLabel={`Hora de inicio ${hourLabel}, detalles del evento`}
+                            })}
                           >
-                            <Text style={styles.timeLabel} numberOfLines={1}>
-                              {hourLabel}
-                            </Text>
-                          </Pressable>
+                            <View
+                              hitSlop={8}
+                              accessibilityRole="button"
+                              accessibilityLabel={`Hora de inicio ${hourLabel}, cambiar hora del evento`}
+                              style={
+                                dragVisual?.reminderId === eventsWithTitleHere[0]?.id
+                                  ? {
+                                      backgroundColor: colors.daySelectedBg,
+                                      borderRadius: 2,
+                                      paddingHorizontal: 2,
+                                    }
+                                  : undefined
+                              }
+                            >
+                              <Text style={styles.timeLabel} numberOfLines={1}>
+                                {hourLabel}
+                              </Text>
+                            </View>
+                          </GestureDetector>
                         ) : eventsWithTitleHere.length === 0 ? (
                           <Pressable
                             onPress={() => {
@@ -1106,7 +1379,7 @@ export function AgendaSchedule({
                           >
                             <Image
                               source={alarmaPng}
-                              style={{ width: eventIconSz, height: eventIconSz, marginLeft: 8 }}
+                              style={{ width: eventIconSz, height: eventIconSz, marginLeft: 8, tintColor: colors.iconActive }}
                               resizeMode="contain"
                             />
                           </Pressable>
@@ -1159,7 +1432,7 @@ export function AgendaSchedule({
                                       >
                                         <Image
                                           source={alarmaPng}
-                                          style={{ width: eventIconSz, height: eventIconSz, marginLeft: 8 }}
+                                          style={{ width: eventIconSz, height: eventIconSz, marginLeft: 8, tintColor: colors.iconActive }}
                                           resizeMode="contain"
                                         />
                                       </Pressable>
@@ -1167,7 +1440,7 @@ export function AgendaSchedule({
                                     {r.note?.trim() ? (
                                       <Image
                                         source={notaPng}
-                                        style={{ width: eventIconSz, height: eventIconSz, marginLeft: 6 }}
+                                        style={{ width: eventIconSz, height: eventIconSz, marginLeft: 6, tintColor: colors.iconActive }}
                                         resizeMode="contain"
                                       />
                                     ) : null}
@@ -1175,46 +1448,83 @@ export function AgendaSchedule({
                                 );
                               }
                               const iconSz = Math.max(12, Math.round(eventTitleFontSize * 0.85));
+                              const isDraggingThis = dragVisual?.reminderId === r.id;
                               return (
                                 <View
                                   key={r.id}
                                   style={[
                                     styles.eventTextRow,
-                                    isSelected && styles.eventTextRowSelected,
+                                    (isSelected || isDraggingThis) && styles.eventTextRowSelected,
                                     {
                                       minHeight: titleRowMinH,
                                       paddingVertical: titlePadV,
+                                      opacity: isDraggingThis ? 0.5 : 1,
+                                      flexDirection: 'row',
+                                      alignItems: 'center',
                                     },
                                   ]}
                                 >
-                                  <EventTitleWithIcons
-                                    title={r.title}
-                                    showAlarm={Boolean(r.alarm && !r.noTime)}
-                                    showNote={Boolean(r.note?.trim())}
-                                    textStyle={styles.eventTextTitle}
-                                    iconSize={iconSz}
-                                    numberOfLines={2}
-                                    onTitlePress={() => {
+                                  <GestureDetector
+                                    gesture={buildReminderDragGesture(r, () => {
                                       if (inlineSlot != null) tryCommitInlineAtActiveSlot();
                                       onReminderPress?.(r);
-                                    }}
-                                    onAlarmPress={
-                                      r.alarm && !r.noTime
-                                        ? () => {
-                                            if (inlineSlot != null) tryCommitInlineAtActiveSlot();
-                                            onReminderAlarmIconPress?.(r);
-                                          }
-                                        : undefined
-                                    }
-                                    onNotePress={
-                                      r.note?.trim()
-                                        ? () => {
-                                            if (inlineSlot != null) tryCommitInlineAtActiveSlot();
-                                            onReminderNoteIconPress?.(r);
-                                          }
-                                        : undefined
-                                    }
-                                  />
+                                    })}
+                                  >
+                                    <View collapsable={false} style={{ flex: 1, minWidth: 0 }}>
+                                      <Text
+                                        style={styles.eventTextTitle}
+                                        numberOfLines={2}
+                                      >
+                                        {r.title}
+                                      </Text>
+                                    </View>
+                                  </GestureDetector>
+                                  {!r.noTime ? (
+                                    <Pressable
+                                      onPress={() => {
+                                        if (inlineSlot != null) tryCommitInlineAtActiveSlot();
+                                        (onReminderHourPress ?? onReminderPress)?.(r);
+                                      }}
+                                      hitSlop={10}
+                                      accessibilityRole="button"
+                                      accessibilityLabel="Abrir detalle del evento"
+                                      style={({ pressed }) => [{ opacity: pressed ? 0.75 : 1 }]}
+                                    >
+                                      <Image
+                                        source={alarmaPng}
+                                        style={{
+                                          width: iconSz,
+                                          height: iconSz,
+                                          marginLeft: 8,
+                                          tintColor: colors.iconActive,
+                                        }}
+                                        resizeMode="contain"
+                                      />
+                                    </Pressable>
+                                  ) : null}
+                                  {r.note?.trim() ? (
+                                    <Pressable
+                                      onPress={() => {
+                                        if (inlineSlot != null) tryCommitInlineAtActiveSlot();
+                                        onReminderNoteIconPress?.(r);
+                                      }}
+                                      hitSlop={10}
+                                      accessibilityRole="button"
+                                      accessibilityLabel="Abrir nota del evento"
+                                      style={({ pressed }) => [{ opacity: pressed ? 0.75 : 1 }]}
+                                    >
+                                      <Image
+                                        source={notaPng}
+                                        style={{
+                                          width: iconSz,
+                                          height: iconSz,
+                                          marginLeft: 6,
+                                          tintColor: colors.iconActive,
+                                        }}
+                                        resizeMode="contain"
+                                      />
+                                    </Pressable>
+                                  ) : null}
                                 </View>
                               );
                             })}
@@ -1243,6 +1553,7 @@ export function AgendaSchedule({
                 const sliceW = lane === maxLanes - 1 ? BAR_WIDTH - sliceLeft : barSliceWidth;
                 /** Carril más a la derecha se dibuja encima (zIndex mayor). */
                 const stackOrder = 10 + lane;
+                const dimmed = dragVisual?.reminderId === p.id;
                 return (
                   <View
                     key={p.id}
@@ -1255,6 +1566,7 @@ export function AgendaSchedule({
                         width: BAR_WIDTH,
                         zIndex: stackOrder,
                         elevation: stackOrder,
+                        opacity: dimmed ? 0.3 : 1,
                       },
                     ]}
                   >
@@ -1282,6 +1594,45 @@ export function AgendaSchedule({
         </View>
       </View>
     </ScrollView>
+      {dragVisual ? (
+        <View
+          pointerEvents="none"
+          style={[
+            StyleSheet.absoluteFillObject,
+            { zIndex: 99999, elevation: 99999 },
+          ]}
+        >
+          <View
+            style={[
+              styles.dragGhost,
+              {
+                left: Math.max(
+                  8,
+                  dragVisual.fingerX - rootOffsetRef.current.x - 70
+                ),
+                top: Math.max(
+                  8,
+                  dragVisual.fingerY - rootOffsetRef.current.y - 24
+                ),
+                height: Math.max(dragVisual.height, 36),
+                backgroundColor: colors.daySelectedBg,
+                borderColor: dragVisual.color,
+              },
+            ]}
+          >
+            <View
+              style={[
+                styles.dragGhostBar,
+                { backgroundColor: dragVisual.color },
+              ]}
+            />
+            <Text style={styles.dragGhostTitle} numberOfLines={2}>
+              {dragVisual.title}
+            </Text>
+          </View>
+        </View>
+      ) : null}
+      </View>
     </Root>
   );
 }

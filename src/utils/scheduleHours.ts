@@ -1,7 +1,21 @@
 /** Minutos desde medianoche para ordenar etiquetas */
-function timeToMinutes(time: string): number {
+export function timeToMinutes(time: string): number {
   const [h, m] = time.split(':').map(Number);
   return h * 60 + (m || 0);
+}
+
+/** Minutos desde medianoche → "HH:mm" 24h. */
+export function minutesToTime24(totalMin: number): string {
+  const t = ((totalMin % (24 * 60)) + 24 * 60) % (24 * 60);
+  const h = Math.floor(t / 60) % 24;
+  const m = t % 60;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
+
+/** Redondea minutos al múltiplo más cercano de `step` (por defecto 30). */
+export function snapMinutes(totalMin: number, step = 30): number {
+  if (step <= 0) return totalMin;
+  return Math.round(totalMin / step) * step;
 }
 
 function hour24ToLabel(hour24: number, minute = 0, use24h = false): string {
@@ -64,6 +78,28 @@ export function reminderEndMinutesForLayout(startTime: string, endTime?: string 
       ? timeToMinutes(endTime)
       : startMin + 60;
   return rawEnd <= startMin ? startMin + 60 : rawEnd;
+}
+
+/**
+ * Nueva hora de inicio (minutos) conservando la duración de layout del recordatorio.
+ * Devuelve start/end en "HH:mm" 24h.
+ */
+export function rescheduleKeepingDuration(
+  startTime: string,
+  endTime: string | null | undefined,
+  newStartMin: number
+): { startTime: string; endTime: string } {
+  const oldStart = timeToMinutes(startTime);
+  const duration = Math.max(1, reminderEndMinutesForLayout(startTime, endTime) - oldStart);
+  const snapped = snapMinutes(newStartMin);
+  const clampedStart = Math.max(0, Math.min(24 * 60 - 1, snapped));
+  let endMin = clampedStart + duration;
+  if (endMin > 24 * 60 - 1) endMin = 24 * 60 - 1;
+  if (endMin <= clampedStart) endMin = Math.min(24 * 60 - 1, clampedStart + 1);
+  return {
+    startTime: minutesToTime24(clampedStart),
+    endTime: minutesToTime24(endMin),
+  };
 }
 
 /**

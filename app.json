@@ -3,7 +3,7 @@
     "name": "Palm Digital",
     "slug": "palm",
     "scheme": "agendapalm",
-    "version": "1.0.3",
+    "version": "1.0.4",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -36,7 +36,7 @@
       },
       "predictiveBackGestureEnabled": false,
       "package": "com.warrioxproductionss.agendapalm",
-      "versionCode": 21
+      "versionCode": 22
     },
     "plugins": [
       "./plugins/withAndroidReleaseSigning.js",

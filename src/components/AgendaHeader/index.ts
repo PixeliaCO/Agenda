@@ -3,4 +3,4 @@
  */
 
 export { AgendaHeader } from './AgendaHeader';
-export type { AgendaHeaderProps } from './AgendaHeader';
+export type { AgendaHeaderProps, DayCellWindowRect } from './AgendaHeader';

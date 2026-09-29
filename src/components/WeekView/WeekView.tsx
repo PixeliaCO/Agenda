@@ -15,6 +15,7 @@ import {
   Animated,
   Dimensions,
 } from 'react-native';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { PalmScreenShell, ScreenOverlay } from '../PalmScreenShell';
 import { usePreferences } from '../../contexts/PreferencesContext';
 import {
@@ -25,10 +26,13 @@ import {
   formatTimeShort,
 } from '../../utils/date';
 import type { Reminder } from '../../types/reminder';
-import { reminderEndMinutesForLayout } from '../../utils/scheduleHours';
+import {
+  reminderEndMinutesForLayout,
+  rescheduleKeepingDuration,
+} from '../../utils/scheduleHours';
 import { scaledFontSize, titleFont } from '../../utils/typography';
-import { EventTitleWithIcons } from '../EventTitleWithIcons';
 import { WEEK_DAY_LETTERS } from '../../constants/agenda';
+import type { ReminderReschedulePayload } from '../AgendaSchedule/AgendaSchedule';
 
 const TIME_COLUMN_WIDTH = 46;
 const NUM_COLS = 7;
@@ -46,6 +50,8 @@ const MIN_BLOCK_HEIGHT = 20;
 const CELL_STACK_PADDING_V = 2;
 const CELL_STACK_GAP = 2;
 const CELL_EVENT_HIT_SLOP = 10;
+const REMINDER_LONG_PRESS_MS = 450;
+const DRAG_MOVE_THRESHOLD_PX = 8;
 
 type WeekGridRow = { slot24: string; displayLabel: string };
 type WeekVisualRow = { slot24: string; displayLabel: string; hour: number; slotIndex: number };
@@ -244,6 +250,26 @@ function yFromMinute(
   return y;
 }
 
+/** Y en la grilla visual → minutos (usa la hora de cada fila visual). */
+function minuteFromYWeek(
+  y: number,
+  gridRows: WeekVisualRow[],
+  rowHeights: number[]
+): number {
+  if (gridRows.length === 0) return 0;
+  let acc = 0;
+  const yClamped = Math.max(0, y);
+  for (let i = 0; i < gridRows.length; i++) {
+    const h = rowHeights[i] ?? WEEK_MIN_ROW_HEIGHT;
+    if (yClamped <= acc + h || i === gridRows.length - 1) {
+      const frac = h > 0 ? Math.max(0, Math.min(1, (yClamped - acc) / h)) : 0;
+      return gridRows[i].hour * 60 + frac * 60;
+    }
+    acc += h;
+  }
+  return gridRows[gridRows.length - 1].hour * 60;
+}
+
 /** Top/height en px con filas de altura variable (la grilla se adapta a la carga de eventos por hora). */
 function blockLayoutVariable(
   startTime: string,
@@ -273,6 +299,22 @@ export type WeekViewProps = {
   onCellPress?: (dateISO: string, hourLabel: string) => void;
   /** Se llama al pulsar un bloque de evento: pasa el recordatorio (para abrir edición o detalles) */
   onReminderPress?: (reminder: Reminder) => void;
+  /** Long-press + drag: nueva fecha/hora al soltar. */
+  onReminderReschedule?: (reminderId: string, payload: ReminderReschedulePayload) => void;
+  /** true mientras hay un drag de cita activo. */
+  onReminderDragActiveChange?: (active: boolean) => void;
+};
+
+type WeekDragVisual = {
+  reminderId: string;
+  title: string;
+  color: string;
+  originTop: number;
+  originLeft: number;
+  width: number;
+  height: number;
+  tx: number;
+  ty: number;
 };
 
 export function WeekView({
@@ -280,12 +322,27 @@ export function WeekView({
   reminders = [],
   onCellPress,
   onReminderPress,
+  onReminderReschedule,
+  onReminderDragActiveChange,
 }: WeekViewProps) {
   const { colors, fontScale, preferences } = usePreferences();
   /** Ancho visible del cuerpo de la semana (para scroll horizontal a nivel pantalla). */
   const [viewportW, setViewportW] = useState(() => Dimensions.get('window').width);
   const hScrollX = useRef(new Animated.Value(0)).current;
   const [tooltipReminder, setTooltipReminder] = useState<Reminder | null>(null);
+  const [dragVisual, setDragVisual] = useState<WeekDragVisual | null>(null);
+  const dragSessionRef = useRef<{
+    reminder: Reminder;
+    originCol: number;
+    originTop: number;
+    moved: boolean;
+  } | null>(null);
+  const weekDatesRef = useRef<string[]>([]);
+  const gridRowsRef = useRef<WeekVisualRow[]>([]);
+  const rowHeightsRef = useRef<number[]>([]);
+  const dayColWRef = useRef(WEEK_MIN_DAY_COL_WIDTH);
+  const onReminderRescheduleRef = useRef(onReminderReschedule);
+  const onReminderDragActiveChangeRef = useRef(onReminderDragActiveChange);
   const weekDates = useMemo(() => getWeekDates(weekAnchor), [weekAnchor]);
 
   const timedForWeek = useMemo(() => reminders.filter((r) => !r.noTime), [reminders]);
@@ -331,6 +388,135 @@ export function WeekView({
     [weekDates, reminders, gridStartHour, numRows, dayColW]
   );
   const gridHeight = useMemo(() => rowHeights.reduce((a, h) => a + h, 0), [rowHeights]);
+
+  weekDatesRef.current = weekDates;
+  gridRowsRef.current = gridRows;
+  rowHeightsRef.current = rowHeights;
+  dayColWRef.current = dayColW;
+  onReminderRescheduleRef.current = onReminderReschedule;
+  onReminderDragActiveChangeRef.current = onReminderDragActiveChange;
+
+  const beginWeekDrag = useCallback(
+    (
+      r: Reminder,
+      colIndex: number,
+      originTop: number,
+      height: number,
+      color: string
+    ) => {
+      if (r.noTime || r.allDay || !onReminderRescheduleRef.current) return;
+      dragSessionRef.current = { reminder: r, originCol: colIndex, originTop, moved: false };
+      setDragVisual({
+        reminderId: r.id,
+        title: r.title,
+        color,
+        originTop,
+        originLeft: colIndex * dayColWRef.current,
+        width: dayColWRef.current - 4,
+        height,
+        tx: 0,
+        ty: 0,
+      });
+      onReminderDragActiveChangeRef.current?.(true);
+    },
+    []
+  );
+
+  const updateWeekDrag = useCallback((tx: number, ty: number) => {
+    const session = dragSessionRef.current;
+    if (!session) return;
+    if (Math.abs(tx) >= DRAG_MOVE_THRESHOLD_PX || Math.abs(ty) >= DRAG_MOVE_THRESHOLD_PX) {
+      session.moved = true;
+    }
+    setDragVisual((prev) => (prev ? { ...prev, tx, ty } : prev));
+  }, []);
+
+  const endWeekDrag = useCallback((tx: number, ty: number) => {
+    const session = dragSessionRef.current;
+    dragSessionRef.current = null;
+    setDragVisual(null);
+    onReminderDragActiveChangeRef.current?.(false);
+    if (!session) return;
+    const moved =
+      session.moved ||
+      Math.abs(tx) >= DRAG_MOVE_THRESHOLD_PX ||
+      Math.abs(ty) >= DRAG_MOVE_THRESHOLD_PX;
+    if (!moved) return;
+    const r = session.reminder;
+    const dayW = Math.max(1, dayColWRef.current);
+    const colOffset = Math.round(tx / dayW);
+    const newCol = Math.max(
+      0,
+      Math.min(weekDatesRef.current.length - 1, session.originCol + colOffset)
+    );
+    const newDate = weekDatesRef.current[newCol] ?? r.date;
+    const newStartMin = minuteFromYWeek(
+      session.originTop + ty,
+      gridRowsRef.current,
+      rowHeightsRef.current
+    );
+    const times = rescheduleKeepingDuration(r.startTime, r.endTime, newStartMin);
+    if (
+      newDate === r.date &&
+      times.startTime === r.startTime &&
+      times.endTime === (r.endTime ?? times.endTime)
+    ) {
+      return;
+    }
+    onReminderRescheduleRef.current?.(r.id, {
+      date: newDate,
+      startTime: times.startTime,
+      endTime: times.endTime,
+    });
+  }, []);
+
+  const cancelWeekDrag = useCallback(() => {
+    if (!dragSessionRef.current) {
+      setDragVisual(null);
+      return;
+    }
+    dragSessionRef.current = null;
+    setDragVisual(null);
+    onReminderDragActiveChangeRef.current?.(false);
+  }, []);
+
+  const buildWeekDragGesture = useCallback(
+    (
+      r: Reminder,
+      colIndex: number,
+      originTop: number,
+      height: number,
+      color: string,
+      onTap: () => void
+    ) => {
+      if (r.noTime || r.allDay || !onReminderReschedule) {
+        return Gesture.Tap().runOnJS(true).onEnd(() => onTap());
+      }
+      /** Resalta apenas se cumple el long press (antes de arrastrar). */
+      const longPress = Gesture.LongPress()
+        .minDuration(REMINDER_LONG_PRESS_MS)
+        .maxDistance(14)
+        .runOnJS(true)
+        .onStart(() => beginWeekDrag(r, colIndex, originTop, height, color));
+      const pan = Gesture.Pan()
+        .activateAfterLongPress(REMINDER_LONG_PRESS_MS)
+        .runOnJS(true)
+        .onUpdate((e) => updateWeekDrag(e.translationX, e.translationY))
+        .onEnd((e) => endWeekDrag(e.translationX, e.translationY))
+        .onFinalize((_e, success) => {
+          if (!success) cancelWeekDrag();
+        });
+      const tap = Gesture.Tap().runOnJS(true).onEnd(() => onTap());
+      return Gesture.Exclusive(Gesture.Simultaneous(longPress, pan), tap);
+    },
+    [
+      onReminderReschedule,
+      beginWeekDrag,
+      updateWeekDrag,
+      endWeekDrag,
+      cancelWeekDrag,
+    ]
+  );
 
   const REMINDER_COLORS = useMemo(
     () => [colors.reminderDefault, colors.reminderAlt1, colors.reminderAlt2, colors.reminderAlt3],
@@ -561,7 +747,7 @@ export function WeekView({
         style={[styles.blocksOverlay, { left: TIME_COLUMN_WIDTH, width: NUM_COLS * dayColW, height: gridHeight }]}
         pointerEvents="box-none"
       >
-        {weekDates.map((dateISO) => {
+        {weekDates.map((dateISO, colIndex) => {
           const dayReminders = remindersForDay(reminders, dateISO);
           const pinNo = dayReminders.filter((r) => r.noTime);
           const timed = dayReminders.filter((r) => !r.noTime);
@@ -576,6 +762,9 @@ export function WeekView({
             const rowTop = vi * (rowHeights[vi] ?? WEEK_MIN_ROW_HEIGHT);
             const rowH = rowHeights[vi] ?? WEEK_MIN_ROW_HEIGHT;
             const bg = r.color ?? REMINDER_COLORS[(timed.indexOf(r) + vi) % REMINDER_COLORS.length];
+            const originTop = pinH + rowTop;
+            const fillH = Math.max(MIN_BLOCK_HEIGHT, rowH - 2 * CELL_STACK_PADDING_V);
+            const isDraggingThis = dragVisual?.reminderId === r.id;
             return (
               <View
                 key={`h-${hour}-s-${vr.slotIndex}`}
@@ -588,14 +777,27 @@ export function WeekView({
                   height: rowH,
                   paddingVertical: CELL_STACK_PADDING_V,
                   paddingHorizontal: 2,
+                  opacity: isDraggingThis ? 0.45 : 1,
                 }}
               >
-                <Pressable
-                  style={[styles.eventFill, { backgroundColor: bg }]}
-                  hitSlop={CELL_EVENT_HIT_SLOP}
-                  onPress={() => setTooltipReminder(r)}
-                  accessibilityRole="button"
-                />
+                <GestureDetector
+                  gesture={buildWeekDragGesture(r, colIndex, originTop, fillH, bg, () =>
+                    setTooltipReminder(r)
+                  )}
+                >
+                  <View
+                    collapsable={false}
+                    style={[
+                      styles.eventFill,
+                      {
+                        backgroundColor: bg,
+                        borderWidth: isDraggingThis ? 2 : 0,
+                        borderColor: colors.daySelectedBg,
+                      },
+                    ]}
+                    accessibilityRole="button"
+                  />
+                </GestureDetector>
               </View>
             );
           });
@@ -623,6 +825,35 @@ export function WeekView({
           );
         })}
       </View>
+      {dragVisual ? (
+        <View
+          pointerEvents="none"
+          style={{
+            position: 'absolute',
+            left: TIME_COLUMN_WIDTH + dragVisual.originLeft + dragVisual.tx,
+            top: dragVisual.originTop + dragVisual.ty,
+            width: dragVisual.width,
+            height: dragVisual.height,
+            backgroundColor: dragVisual.color,
+            opacity: 0.92,
+            borderRadius: 2,
+            borderWidth: 2,
+            borderColor: colors.daySelectedBg,
+            zIndex: 50,
+            elevation: 50,
+            paddingHorizontal: 4,
+            paddingVertical: 2,
+            justifyContent: 'center',
+          }}
+        >
+          <Text
+            numberOfLines={2}
+            style={{ color: '#fff', fontSize: fs(10), ...titleFont }}
+          >
+            {dragVisual.title}
+          </Text>
+        </View>
+      ) : null}
     </View>
   );
 
@@ -638,6 +869,7 @@ export function WeekView({
           keyboardShouldPersistTaps="handled"
           style={styles.weekHScroll}
           scrollEventThrottle={16}
+          scrollEnabled={dragVisual == null}
           onScroll={Animated.event([{ nativeEvent: { contentOffset: { x: hScrollX } } }], {
             useNativeDriver: true,
           })}
@@ -677,6 +909,7 @@ export function WeekView({
                 contentContainerStyle={styles.gridScrollContent}
                 showsVerticalScrollIndicator={true}
                 nestedScrollEnabled
+                scrollEnabled={dragVisual == null}
               >
                 {gridContent}
               </ScrollView>
