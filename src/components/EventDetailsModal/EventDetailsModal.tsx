@@ -95,8 +95,13 @@ export type EventDetailsModalProps = {
 /** Aire extra entre el formulario y el teclado en el modal. */
 const MODAL_KEYBOARD_EXTRA = 32;
 
-/** Minutos de 1 en 1 (selector estilo Palm). */
-const PALM_MINUTE_STEPS = Array.from({ length: 60 }, (_, i) => String(i).padStart(2, '0'));
+/** Salto del selector de minutos. La lista y el scroll se derivan de aqui, no se repite. */
+const PALM_MINUTE_STEP = 5;
+
+/** Minutos de 5 en 5 (selector estilo Palm). */
+const PALM_MINUTE_STEPS = Array.from({ length: 60 / PALM_MINUTE_STEP }, (_, i) =>
+  String(i * PALM_MINUTE_STEP).padStart(2, '0')
+);
 
 /** Filas visibles en cada columna hora/minuto del selector Palm. */
 const PALM_PICKER_ROW_COUNT = 5;
@@ -1648,7 +1653,7 @@ export function EventDetailsModal({
     const mStr = palmTimeFocus === 'start' ? startMin : endMin;
     const m = Number.parseInt(mStr, 10);
     if (!Number.isFinite(m) || m < 0 || m > 59) return;
-    const y = palmScrollY(m, palmMinutesMaxY);
+    const y = palmScrollY(Math.floor(m / PALM_MINUTE_STEP), palmMinutesMaxY);
     palmMinutesOffsetRef.current = y;
     syncPalmNav(y, palmMinutesMaxY, setPalmMinutesNav);
     const id = requestAnimationFrame(() => {
