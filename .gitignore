@@ -41,3 +41,7 @@ credentials/android/.key-pass.tmp
 *.tsbuildinfo
 
 # generated native folders
+
+# JVM crash dumps
+hs_err_pid*.log
+replay_pid*.log
