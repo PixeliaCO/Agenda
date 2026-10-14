@@ -47,7 +47,7 @@
         <action android:name="com.warrioxproductionss.agendapalm.UPDATE_CALENDAR_ICON"/>
       </intent-filter>
     </receiver>
-    <activity-alias android:name=".CalendarIcon_d1_w0" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d1_w0" android:roundIcon="@mipmap/ic_cal_d1_w0" android:targetActivity=".MainActivity" android:label="@string/app_name">
+    <activity-alias android:name=".CalendarIcon_d1_w0" android:enabled="true" android:exported="true" android:icon="@mipmap/ic_cal_d1_w0" android:roundIcon="@mipmap/ic_cal_d1_w0" android:targetActivity=".MainActivity" android:label="@string/app_name">
       <intent-filter>
         <action android:name="android.intent.action.MAIN"/>
         <category android:name="android.intent.category.LAUNCHER"/>
@@ -1307,7 +1307,7 @@
         <category android:name="android.intent.category.LAUNCHER"/>
       </intent-filter>
     </activity-alias>
-    <activity-alias android:name=".CalendarIcon_d25_w6" android:enabled="true" android:exported="true" android:icon="@mipmap/ic_cal_d25_w6" android:roundIcon="@mipmap/ic_cal_d25_w6" android:targetActivity=".MainActivity" android:label="@string/app_name">
+    <activity-alias android:name=".CalendarIcon_d25_w6" android:enabled="false" android:exported="true" android:icon="@mipmap/ic_cal_d25_w6" android:roundIcon="@mipmap/ic_cal_d25_w6" android:targetActivity=".MainActivity" android:label="@string/app_name">
       <intent-filter>
         <action android:name="android.intent.action.MAIN"/>
         <category android:name="android.intent.category.LAUNCHER"/>
