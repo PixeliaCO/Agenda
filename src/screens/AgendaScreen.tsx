@@ -20,6 +20,7 @@ import type { Reminder, CreateReminderInput, UpdateReminderInput } from '../type
 import { buildHoursLabelsWithOptional30 } from '../utils/scheduleHours';
 import {
   formatDisplayDate,
+  formatMonthName,
   formatWeekMonthYearRange,
   getWeekNumber,
   getSundayOfWeek,
@@ -136,7 +137,8 @@ export function AgendaScreen() {
   const weekSunday = useMemo(() => getSundayOfWeek(weekAnchor), [weekAnchor]);
   const weekHeaderLabel = useMemo(() => formatWeekMonthYearRange(weekSunday), [weekSunday]);
   const weekNumber = useMemo(() => getWeekNumber(weekSunday), [weekSunday]);
-  const monthHeaderLabel = useMemo(() => formatDisplayDate(selectedDate), [selectedDate]);
+  const monthName = useMemo(() => formatMonthName(monthAnchor), [monthAnchor]);
+  const monthYear = useMemo(() => String(monthAnchor.getFullYear()), [monthAnchor]);
 
   const loadReminders = useCallback(async () => {
     const list = await getRemindersByDate(selectedDate);
@@ -368,7 +370,7 @@ export function AgendaScreen() {
     });
     await syncReminderNotification(created);
     await loadReminders();
-    await loadWeekReminders();
+    await Promise.all([loadWeekReminders(), loadMonthReminders()]);
   };
 
   const handleInlineCancel = () => {
@@ -383,14 +385,14 @@ export function AgendaScreen() {
     const updated = await updateReminder(id, input);
     if (updated) await syncReminderNotification(updated);
     await loadReminders();
-    await loadWeekReminders();
+    await Promise.all([loadWeekReminders(), loadMonthReminders()]);
   };
 
   const handleDelete = async (id: string) => {
     await cancelNotificationsForReminder(id);
     await deleteReminder(id);
     await loadReminders();
-    await loadWeekReminders();
+    await Promise.all([loadWeekReminders(), loadMonthReminders()]);
   };
 
   const commitPendingTitleEdit = useCallback((): boolean => {
@@ -427,7 +429,7 @@ export function AgendaScreen() {
       const updated = await updateReminder(id, payload);
       if (updated) await syncReminderNotification(updated);
       await loadReminders();
-      await loadWeekReminders();
+      await Promise.all([loadWeekReminders(), loadMonthReminders()]);
 
       if (updated) {
         if (updated.date !== selectedDate) {
@@ -438,7 +440,7 @@ export function AgendaScreen() {
         }
       }
     },
-    [commitPendingTitleEdit, loadReminders, loadWeekReminders, selectedDate]
+    [commitPendingTitleEdit, loadReminders, loadWeekReminders, loadMonthReminders, selectedDate]
   );
 
   const handleDetalles = useCallback(() => {
@@ -554,7 +556,7 @@ export function AgendaScreen() {
       if (updated) await syncReminderNotification(updated);
     }
     await loadReminders();
-    await loadWeekReminders();
+    await Promise.all([loadWeekReminders(), loadMonthReminders()]);
     if (createdForInlineTitle) {
       const c = createdForInlineTitle;
       InteractionManager.runAfterInteractions(() => {
@@ -609,9 +611,13 @@ export function AgendaScreen() {
     setWeekAnchor(d);
   };
 
+  /** Primer toque: selecciona el día y muestra su resumen; toque sobre el día ya seleccionado: abre la vista de día. */
   const handleMonthDayPress = (dateISO: string) => {
+    if (dateISO === selectedDate) {
+      setActiveTab('day');
+      return;
+    }
     setSelectedDate(dateISO);
-    setActiveTab('day');
   };
 
   const handleEventsReminderPress = (reminder: Reminder) => {
@@ -624,17 +630,36 @@ export function AgendaScreen() {
     setDetailsVisible(true);
   };
 
-  const handlePreviousMonth = () => {
-    const d = new Date(monthAnchor);
-    d.setMonth(d.getMonth() - 1);
-    setMonthAnchor(d);
-  };
+  /** Día 1 para que un ancla en 29–31 no salte dos meses. */
+  const handlePreviousMonth = useCallback(() => {
+    setMonthAnchor((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1));
+  }, []);
 
-  const handleNextMonth = () => {
-    const d = new Date(monthAnchor);
-    d.setMonth(d.getMonth() + 1);
-    setMonthAnchor(d);
-  };
+  const handleNextMonth = useCallback(() => {
+    setMonthAnchor((prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1));
+  }, []);
+
+  const monthSwipeGesture = useMemo(
+    () =>
+      Gesture.Pan()
+        .activeOffsetX([-36, 36])
+        .failOffsetY([-22, 22])
+        .onEnd((e) => {
+          const tx = e.translationX;
+          const vx = e.velocityX;
+          const distOk = Math.abs(tx) >= 44;
+          const velOk = Math.abs(vx) >= 420;
+          if (!distOk && !velOk) return;
+          if (distOk) {
+            if (tx < 0) runOnJS(handleNextMonth)();
+            else runOnJS(handlePreviousMonth)();
+          } else {
+            if (vx < 0) runOnJS(handleNextMonth)();
+            else runOnJS(handlePreviousMonth)();
+          }
+        }),
+    [handleNextMonth, handlePreviousMonth]
+  );
 
   const handleIrA = () => {
     const d = new Date(selectedDate + 'T12:00:00');
@@ -764,12 +789,18 @@ export function AgendaScreen() {
         </View>
       )}
       {activeTab === 'month' && (
-        <AgendaNavBar chipLabel={monthHeaderLabel}>
+        <AgendaNavBar chipLabel={monthYear}>
           <View style={navStyles.rightWrap}>
             <TouchableOpacity style={navStyles.arrowCell} onPress={handlePreviousMonth} hitSlop={12}>
               <Text style={navStyles.arrowText}>{'◀'}</Text>
             </TouchableOpacity>
-            <View style={{ width: 8 }} />
+            <View style={navStyles.selector}>
+              <View style={[navStyles.selectorLabel, { flex: 1 }]}>
+                <Text style={navStyles.selectorLabelText} numberOfLines={1}>
+                  {monthName}
+                </Text>
+              </View>
+            </View>
             <TouchableOpacity style={navStyles.arrowCell} onPress={handleNextMonth} hitSlop={12}>
               <Text style={navStyles.arrowText}>{'▶'}</Text>
             </TouchableOpacity>
@@ -777,13 +808,18 @@ export function AgendaScreen() {
         </AgendaNavBar>
       )}
       {activeTab === 'month' && (
-        <View style={styles.daySwipeArea}>
-          <MonthView
-            monthAnchor={monthAnchor}
-            reminders={monthReminders}
-            onDayPress={handleMonthDayPress}
-          />
-        </View>
+        <GestureDetector gesture={monthSwipeGesture}>
+          <View style={styles.daySwipeArea}>
+            <MonthView
+              monthAnchor={monthAnchor}
+              reminders={monthReminders}
+              selectedDate={selectedDate}
+              selectedDayReminders={reminders}
+              onDayPress={handleMonthDayPress}
+              onReminderPress={handleEventsReminderPress}
+            />
+          </View>
+        </GestureDetector>
       )}
       {activeTab === 'events' && (
         <View style={styles.daySwipeArea}>

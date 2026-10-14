@@ -48,6 +48,11 @@ export function formatMonthYearShort(date: Date): string {
   return `${MONTHS_LONG[date.getMonth()]} ${date.getFullYear()}`;
 }
 
+/** Nombre completo del mes para la cabecera de mes: "Enero" */
+export function formatMonthName(date: Date): string {
+  return MONTHS_LONG[date.getMonth()];
+}
+
 /**
  * Formatea la cabecera de semana mostrando uno o dos meses.
  * Si la semana está en un solo mes: "Enero 2026".

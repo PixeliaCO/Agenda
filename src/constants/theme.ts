@@ -58,6 +58,10 @@ export type ThemeColors = {
   /** Bisel de botones retro (luz arriba-izq, sombra abajo-der) */
   footerBevelLight: string;
   footerBevelDark: string;
+  /** Número de los domingos en la vista de mes */
+  sundayText: string;
+  /** Franjas de festivo en la vista de mes */
+  holidayStripe: string;
 };
 
 /** Claro: fondo blanco, barras azul acero, acento azul intenso */
@@ -102,6 +106,8 @@ export const lightTheme: ThemeColors = {
   footerText: '#1a1a1a',
   footerBevelLight: '#ffffff',
   footerBevelDark: '#888888',
+  sundayText: '#d92d20',
+  holidayStripe: '#16a34a',
 };
 
 /** Oscuro: azul marino / pizarra, acentos cielo */
@@ -146,6 +152,8 @@ export const darkTheme: ThemeColors = {
   footerText: '#e2e8f0',
   footerBevelLight: '#475569',
   footerBevelDark: '#0c1019',
+  sundayText: '#f87171',
+  holidayStripe: '#4ade80',
 };
 
 export const colors = lightTheme;
